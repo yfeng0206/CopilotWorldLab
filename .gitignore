@@ -1,27 +1,50 @@
-# Build artifacts
-*.docx
-
-# Internal working notes (not for publication)
-PRIOR_WORK.md
-*_Context_Handoff.md
-*roadmap.md
-
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.cache/
+.ipynb_checkpoints/
+
+# Virtual environments
 .venv/
 venv/
-*.egg-info/
+env/
 
-# OS / editor
+# Model weights / datasets / run outputs
+*.pt
+*.pth
+*.pth.tar
+*.safetensors
+*.ckpt
+checkpoints/
+data/
+outputs/
+logs/
+*.log
+
+# Generated proposal artifacts / proposal workflow (kept local, not committed)
+*.docx
+scripts/proposal/
+fig_*.png
+
+# Local working changelog (not committed, per project convention)
+CHANGELOG.md
+
+# Cloned third-party source (not vendored)
+third_party/
+
+# Secrets / tokens (never commit)
+.env
+*token*.txt
+*.key
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
-desktop.ini
-*.swp
-*.tmp
-
-# Secrets (safety net)
-.env
-*.key
-*.pem
-*.pfx
+_tmp_*
