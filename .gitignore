@@ -1,0 +1,27 @@
+# Build artifacts
+*.docx
+
+# Internal working notes (not for publication)
+PRIOR_WORK.md
+*_Context_Handoff.md
+*roadmap.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.tmp
+
+# Secrets (safety net)
+.env
+*.key
+*.pem
+*.pfx
