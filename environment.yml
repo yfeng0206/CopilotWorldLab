@@ -1,0 +1,28 @@
+# CopilotWorldLab conda environment (alternative to venv + requirements.txt).
+#
+#   conda env create -f environment.yml
+#   conda activate cwlab
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#
+# PyTorch is installed via pip from the CUDA 12.4 wheel index (not conda), to match
+# the verified Windows + RTX 3090 setup.
+name: cwlab
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - mujoco>=3.1
+      - numpy>=1.26
+      - opencv-python>=4.9
+      - pillow>=10.0
+      - imageio>=2.34
+      - pyyaml>=6.0
+      - huggingface_hub>=0.24
+      - safetensors>=0.4
+      - einops>=0.8
+      - transformers>=4.44
+      - scipy>=1.11
+      - tqdm>=4.66
+      - pytest>=8.0

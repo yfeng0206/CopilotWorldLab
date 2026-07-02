@@ -1,0 +1,29 @@
+# CopilotWorldLab - Python dependencies (Python >= 3.11).
+#
+# PyTorch is installed from the CUDA 12.4 wheel index, not PyPI. Install it first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# then:
+#   pip install -r requirements.txt
+#
+# Verified on Windows 11 + RTX 3090 (24 GB), driver 610.62 / CUDA UMD 13.3.
+
+# Simulation + rendering (step 1)
+mujoco>=3.1
+numpy>=1.26
+opencv-python>=4.9
+pillow>=10.0
+imageio>=2.34
+pyyaml>=6.0
+
+# World-model wiring (later sessions; encoder/checkpoint I/O)
+huggingface_hub>=0.24
+safetensors>=0.4
+einops>=0.8
+transformers>=4.44
+scipy>=1.11
+tqdm>=4.66
+
+# Tests
+pytest>=8.0
+
+# torch>=2 and torchvision are installed from the cu124 index (see header).
