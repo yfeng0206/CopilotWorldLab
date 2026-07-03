@@ -99,3 +99,39 @@ not sneak back in.
   joint update; on a non-converged solve the returned error is one step stale.
 - **Rule**: After the IK loop, recompute forward kinematics and the residual for the final
   configuration before returning it. Callers use the residual to detect failed solves.
+
+### 13. Large model weights live on D: via a directory junction
+- **What happens**: C: (231 GB) fills up with the 11 GB checkpoint plus caches; D: has
+  1.3 TB free.
+- **Rule**: The checkpoint lives at `D:\CopilotWorldLab\checkpoints\`; the repo's
+  `checkpoints/` is a Windows junction pointing there, so relative paths like
+  `checkpoints/vjepa2-ac-vitg.pt` work unchanged. Future model downloads go to D: via
+  `TORCH_HOME` / `HF_HOME` (set to `D:\CopilotWorldLab\cache\...`). Do not commit the
+  junction target; `checkpoints/` is already gitignored.
+
+---
+
+## V-JEPA 2-AC inference (CEM planning)
+
+### 14. fp32 disables flash attention; always plan in bf16
+- **What happens**: Running the ViT-g predictor in fp32 is several times slower than bf16
+  for the same CEM config.
+- **Why**: torch's scaled-dot-product-attention only dispatches the fused flash /
+  mem-efficient kernels for fp16/bf16; fp32 falls back to the slow math kernel.
+- **Rule**: Wrap encode + CEM in `torch.autocast(device, dtype=torch.bfloat16)`. bf16 is
+  the intended inference precision for this model.
+
+### 15. High CEM sample counts hit a CUDA allocator cliff; chunk the predictor batch
+- **What happens**: bf16 timing was linear up to 400 samples (~0.04 s/sample) then jumped
+  from an expected ~32 s to **148 s** at 800 samples on the 24 GB 3090. A predictor-vs-pose
+  breakdown showed the predictor was still only 31 s and the CPU pose update 1.2 s -- ~115 s
+  was framework overhead that appeared exactly when peak memory crossed ~12 -> 17 GiB.
+- **Why**: once the activation working set is large enough that the allocator cache cannot
+  serve a request, PyTorch falls back to synchronous `cudaMalloc`/`cudaFree` per step
+  (allocator thrash). It is a memory-pressure artifact, not extra compute.
+- **Rule**: chunk the CEM sample batch through the predictor (`--chunk`, default 200) so
+  peak stays in the linear regime. Chunking is numerically identical (each sample is an
+  independent batch row) -- verified the planned action is unchanged. Result: 800 samples
+  drop to 32 s (predictor-bound) at 15 GiB peak. Do NOT set
+  `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` on Windows; it is unsupported there and
+  only prints a warning.

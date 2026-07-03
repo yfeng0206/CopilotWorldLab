@@ -15,6 +15,60 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ### 2026-07-02 -- Stage-1 set-up: environment, repo restyle, MuJoCo scaffold
 
+#### 9. First V-JEPA 2-AC inference: logging, timing, and the 800-sample memory cliff
+**Context**: With the model verified, load it from the local checkpoint and time one planned
+action (encode context + goal, run CEM-MPC on the latent energy) against the paper's ~16 s
+on a 4090, using JEPA-style logging. Do a small-to-big sample sweep.
+**Setup**: `scripts/vjepa2_ac_infer_test.py` loads ViT-g encoder (strict=False, RoPE) +
+AC predictor (strict) from `checkpoints/vjepa2-ac-vitg.pt`, encodes the vendored
+`franka_example_traj.npz`, and runs `cem(...)` per config. Logging via `src/utils/logging.py`
+(CSV + file + console). Isolated from our own `src` by loading the logging module by file
+path before the vendored repo's top-level `src` shadows the package.
+**Investigation**:
+- fp32 is far slower than bf16: torch SDPA only fuses flash / mem-efficient attention in
+  fp16/bf16, so fp32 falls back to the math kernel. All timing below is bf16.
+- bf16 sweep (RTX 3090, samples x 10 iters x horizon 1) was linear up to 400 but then
+  exploded: 100 -> 4.4 s, 200 -> 8.1 s, 400 -> 15.9 s, **800 -> 148 s**.
+- Added a per-call breakdown (predictor GPU time vs pose CPU time). At 800 the predictor was
+  only 31 s and the CPU pose update 1.2 s -- so ~115 s was pure framework overhead, appearing
+  exactly when peak memory crossed ~12 -> 17 GiB. Classic CUDA allocator thrash: once the
+  activation working set is large enough, PyTorch issues synchronous cudaMalloc/cudaFree
+  every step. It was never a compute problem.
+**Solution**: chunk the CEM sample batch through the predictor (`--chunk`, default 200) so
+peak stays in the linear regime. Chunking is numerically identical (each sample is an
+independent batch row): the planned action is unchanged at `(+0.075, +0.075, +0.075, gripper
++0.675)`.
+**Outcome** (bf16, chunk=200, RTX 3090): 100 -> 4.4 s, 400 -> 16.1 s, **800 -> 32.0 s**
+(predictor 30.5 s, peak 15.0 GiB), a 4.6x speed-up at 800 with lower memory. 32 s on a 3090
+is consistent with the paper's 16 s on a 4090 (~1.8x faster GPU): timing reproduced. Model
+load 18 s, weights 5.0 GiB on GPU. CSV timings in `logs/vjepa2_ac_timing_*.csv`.
+**Audit** (rubber-duck, gpt-5.5 xhigh): no blockers; applied all four findings -- fail loudly
+on a genuine encoder checkpoint mismatch (keep `strict=False` per upstream but raise on
+unexpected keys or non-RoPE missing keys), harden the vendored-`src` isolation (evict repo
+root + any project `src*` modules before importing the vendored package), normalize the CUDA
+device (`torch.device` + `set_device`, so explicit `cuda:N` works), and load with
+`weights_only=True`. Re-validated: identical timings and planned action.
+**References**: arXiv:2506.09985 Sec 3 (CEM-MPC, ~16 s/action on 4090);
+facebookresearch/vjepa2 notebooks/utils/mpc_utils.py (`cem`, `compute_new_pose`),
+src/hub/backbones.py (`_make_vjepa2_ac_model`, `_clean_backbone_key`).
+
+#### 8. V-JEPA 2-AC compute analysis + fine-tuning plan (doc before code)
+**Context**: Before wiring inference, quantify param sizes and whether the model + a
+predictor fine-tune fit on the 24 GB 3090, and plan the fine-tune like the paper.
+**Findings** (measured from `checkpoints/vjepa2-ac-vitg.pt`): encoder 1.012B, predictor
+305M (both fp32); file also holds a `target_encoder` EMA copy + optimizer state (why it is
+11.76 GB). Training metadata: epoch 315, eff. batch 256, lr 4.25e-4. xformers is NOT needed
+(no import in the repo; ViT-g uses torch SDPA). Two integration snags: the cloned repo's
+`VJEPA_BASE_URL` is a localhost stub (so load our local checkpoint directly), and the
+vendored repo has its own top-level `src` that collides with ours (must isolate).
+**Budget (24 GiB)**: inference ~4 GiB (bf16); CEM 800 samples fits (paper used a 4090,
+same 24 GB); predictor fine-tune with frozen encoder ~8-12 GiB. Full end-to-end (unfreeze
+encoder) ~19-21 GiB just for optimizer/grad/params -> OOM, hence freeze the encoder.
+**Outcome**: wrote `docs/vjepa2_ac_architecture.md` (component tables, memory budget,
+fine-tune plan, integration boundary), structured like the OCT repo's architecture.md.
+**References**: arXiv:2506.09985 Sec 3; facebookresearch/vjepa2 src/hub/backbones.py,
+notebooks; checkpoint state_dict.
+
 #### 7. DROID-style Franka + Robotiq reproduction, robosuite eval, scripted reach, audit
 **Context**: Reproduce the paper's robot setup (Franka Panda + Robotiq 2F-85, exocentric
 camera, 7-D end-effector control) and pick a benchmark suite.
