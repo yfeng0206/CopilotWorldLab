@@ -67,3 +67,35 @@ not sneak back in.
 - **Rule**: `.gitignore` covers `*token*.txt`, `checkpoints/`, `data/`, `.venv/`,
   `third_party/`, `*.docx`, the proposal workflow (`scripts/proposal/`, `fig_*.png`) and
   the local `CHANGELOG.md`. The committed tree is code + docs only.
+
+---
+
+## Simulation and control (Franka / robosuite)
+
+### 9. The end-effector site must be the gripper TCP, not the arm flange
+- **What happens**: Attaching Robotiq to the Panda leaves the arm's `attachment_site`
+  (flange) at ~15.6 cm above the actual grasp point. Controlling/measuring the flange
+  makes wrist rotations move the grasp point incorrectly.
+- **Rule**: Use the gripper TCP (`2f85_pinch`) as the EE site for control and state. Keep
+  `attachment_site` only as the mount point for the spec merge.
+
+### 10. mjSpec merge drops the child's physics options; re-set them after merging
+- **What happens**: Attaching `robotiq_2f85` (elliptic friction cone, impratio 10) onto the
+  Panda keeps the parent's pyramidal cone; a warning is printed and the gripper's intended
+  contact model is silently lost.
+- **Rule**: After `attach_body`, explicitly set `spec.option.cone = mjCONE_ELLIPTIC` and
+  `spec.option.impratio` before `compile()`. Verify on the compiled model (`m.opt.cone`).
+
+### 11. robosuite 1.5.2 is incompatible with mujoco 3.10
+- **What happens**: `robosuite.make(...).reset()` raises `TypeError: mj_fullM(): incompatible
+  function arguments` -- robosuite's OSC controller calls `mj_fullM(model, dst, qM)` (old
+  2-arg-ish form) but mujoco 3.10 requires `mj_fullM(model, data, dst)`.
+- **Rule**: robosuite needs a mujoco version matching its release (~3.3.x). Our stack pins
+  mujoco 3.10 (torch + our env), so we use our own Franka+IK env; only adopt robosuite in a
+  separate env or once it supports 3.10.
+
+### 12. Differential IK returns a stale residual unless recomputed after the loop
+- **What happens**: The residual is computed at the top of each iteration, before the last
+  joint update; on a non-converged solve the returned error is one step stale.
+- **Rule**: After the IK loop, recompute forward kinematics and the residual for the final
+  configuration before returning it. Callers use the residual to detect failed solves.

@@ -29,7 +29,12 @@ MPC (at ~16 s/action, large-N CEM trials are expensive on one 3090):
 2. **One-step interface calibration.** Generate known sim transitions
    `(x_k, s_k, a_gt, x_{k+1})`; score candidate deltas through the predictor and confirm
    `a_gt` is ranked near the latent-energy minimum. Sweep world- vs body-frame, per-axis
-   sign, and translation/rotation scale until the ground-truth action wins.
+   sign, and translation/rotation scale until the ground-truth action wins. This mirrors
+   the paper's own unsupervised calibration (App. B.4): drive random actions, compare
+   V-JEPA 2-AC's energy-inferred (dx, dy) against the executed actions, least-squares-fit
+   a 2x2 map `W*` (they find it is ~a rotation, condition number ~1.5, ~1.6 cm systematic
+   error), and correct inferred actions by `W*` before use. Use the third-person
+   `scene_cam` -- the model was trained only on exocentric DROID views.
 3. **Camera / cadence ablation.** Repeat (2) with `scene_cam` (third-person, DROID-like)
    vs `wrist_cam`, and with the action interval aligned to ~4 fps (~0.25 s) rather than a
    single sim step. Lock in the interface before planning.
@@ -49,11 +54,17 @@ MPC (at ~16 s/action, large-N CEM trials are expensive on one 3090):
 - [x] Minimal MuJoCo scene and `MujocoPilotEnv` (render, 7-DoF EE, goal capture).
 - [x] V-JEPA 2-AC interface scaffold and download-only checkpoint fetch.
 - [x] Test suite (geometry, env kinematics, render) passing.
+- [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
+- [x] Franka + Robotiq 2F-85 composed (mjSpec), exocentric camera, EE-space control via
+      differential IK (`FrankaDroidEnv`); scripted reach test passes 5/5.
+- [ ] `apply_action` dynamically stepped (IK -> ctrl -> mj_step) with a measured gripper
+      opening and action bounds (audit top fix; required before grasp / world-model wiring).
 - [ ] Encoder-only inference on a rendered frame.
 - [ ] CEM planning to a goal image; latency measurement.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
-- [ ] Franka (MuJoCo Menagerie) behind the same 7-D interface.
+- [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
+- [ ] Franka behind the same 7-D EE interface (differential-IK / mocap-weld pose->joint shim).
 
 ## Evaluation (the two primary measurements)
 

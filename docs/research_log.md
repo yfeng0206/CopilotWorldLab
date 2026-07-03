@@ -15,6 +15,67 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ### 2026-07-02 -- Stage-1 set-up: environment, repo restyle, MuJoCo scaffold
 
+#### 7. DROID-style Franka + Robotiq reproduction, robosuite eval, scripted reach, audit
+**Context**: Reproduce the paper's robot setup (Franka Panda + Robotiq 2F-85, exocentric
+camera, 7-D end-effector control) and pick a benchmark suite.
+**Investigation / decisions**:
+- Composed Franka `panda_nohand` + `robotiq_2f85` via MuJoCo `MjSpec` (mount at the arm
+  flange `attachment_site`); added table, floor, light, and a fixed `exo_cam`.
+- Added a differential-IK EE-space controller (`src/utils/ik.py`, damped least squares on
+  the site Jacobian) so a 7-D EE delta drives the arm; wrapped as `FrankaDroidEnv`.
+- Evaluated **robosuite** as the benchmark suite. It fits on paper (OSC = EE control,
+  Lift/PickPlace tasks, Robotiq grippers, `mujoco>=3.3.0` so no downgrade), BUT v1.5.2 is
+  incompatible with mujoco 3.10: its OSC controller calls `mj_fullM` with the old 2-arg
+  signature (3-arg in 3.10). Deferred; kept our own Franka+IK env.
+- Built `scripts/scripted_reach_test.py`: a physically-real prescripted reach (IK ->
+  data.ctrl -> mj_step, dynamic servos) to 5 targets with a marker; 5/5 reached, viewer +
+  headless.
+- Ran a rubber-duck audit (gpt-5.5, xhigh). Applied the clean fixes: EE control/state moved
+  from the flange to the Robotiq TCP `2f85_pinch` (the flange was ~15.6 cm off), restored
+  the elliptic friction cone + impratio after the spec merge, and made `solve_ik` return a
+  non-stale final residual. Deferred the bigger fix: make `apply_action` dynamically
+  stepped with a measured gripper opening (currently teleports; fine for reach, wrong for
+  grasp).
+**Outcome**: Franka+Robotiq loads/renders/controls in EE space; scripted reach passes 5/5;
+21 tests pass. robosuite set aside on version grounds.
+**References**: MuJoCo Menagerie franka_emika_panda + robotiq_2f85; robosuite v1.5.2
+setup.py (`mujoco>=3.3.0`); arXiv:2506.09985 Section 3-4; franka-audit findings.
+
+#### 6. Real Franka Panda in MuJoCo: bring-up + timing (no model)
+**Context**: First concrete Stage-1 milestone -- get the official Franka into MuJoCo,
+confirm it renders/actuates, and check sim timing against the paper's control cadence.
+**Investigation**: Sparse-checked-out `google-deepmind/mujoco_menagerie/franka_emika_panda`
+(into the gitignored `third_party/`). The model: dt=0.002, nq/nv/nu=9/9/8 (7 arm joints +
+2 tendon-coupled fingers; 7 position-servo actuators taking joint-angle targets + 1 gripper
+actuator, ctrl 0-255), end-effector = the `hand` body, a `home` keyframe, and NO camera
+defined. Wrote `scripts/franka_smoke_test.py`.
+**Outcome**: Loads, renders (256x256, saved to gitignored `outputs/franka_home.png`), and
+actuates correctly (commanding joint1 -> 0.6 rad moved the hand 32.8 cm). Timing on the
+RTX 3090 box: physics ~63k steps/s (~126x real-time), render ~783 fps, and a full
+16-frame / 4 s observation clip built in ~57 ms wall-clock. So MuJoCo is negligible next to
+the paper's ~16 s/action ViT-g CEM budget -- the model, not the simulator, is the
+bottleneck. Cadence maps cleanly: 0.25 s/action = 125 steps, 4 s clip = 2000 steps.
+**Next**: The Franka is joint-space position-controlled, but V-JEPA 2-AC emits 7-D EE-space
+deltas, so we need a pose->joint layer (differential IK via `mj_jac`, or a mocap target +
+weld) as the "Franka behind the 7-D interface" shim.
+**References**: MuJoCo Menagerie franka_emika_panda; arXiv:2506.09985 Section 3.1 (cadence).
+
+#### 5. Full re-read of the V-JEPA 2 paper (local PDF, 48 pp) -- calibration recipe found
+**Context**: Re-read the paper end-to-end to lock the interface before wiring inference.
+**Findings**: (a) CEM uses 800 samples, 10 iterations over the **top-10** (App. B.2) --
+our `PlannerConfig(top_k=10)` is already correct. (b) The model trains only on **left
+exocentric** (third-person) DROID views -- validates the pilot default camera `scene_cam`,
+not `wrist_cam`. (c) App. B.4 gives an **unsupervised calibration recipe**: the inferred
+action axis rotates ~linearly with camera angle (systematic ~1.6 cm error on a ~5 cm
+delta), removable by least-squares-fitting a 2x2 rotation `W*` from energy-inferred to
+executed (dx, dy) -- exactly our interface-calibration step. (d) The energy minimum is only
+*near* ground truth (Fig. 9: ~(0,-0.05) vs (0,-0.1)) -- a systematic offset the confidence
+gate must tolerate. (e) 'simulation' appears once, only in the Rubinstein CEM citation
+title -- confirms no simulator anywhere.
+**Outcome**: Updated `related_work.md` and `plan.md` (step 2) with the calibration recipe;
+no code change needed (config/planner already match).
+**References**: arXiv:2506.09985 Sections 3-4, App. B.2/B.4, Figs. 9/16.
+
 #### 4. V-JEPA 2-AC checkpoint acquired (download only)
 **Context**: Need the action-conditioned weights ready for next session without running
 inference now.
