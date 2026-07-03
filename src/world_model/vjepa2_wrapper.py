@@ -1,10 +1,11 @@
-"""V-JEPA 2-AC world-model wrapper (scaffold - no inference this session).
+"""V-JEPA 2-AC world-model wrapper (control-loop scaffold).
 
 This module defines the interface the pilot will use to drive the coarse
-end-effector motion with Meta's action-conditioned V-JEPA 2 latent world model,
-and records the exact, primary-source-verified facts needed to wire it up
-tomorrow. Nothing here downloads or runs a network; the heavy imports (torch)
-happen lazily inside functions so importing this module stays cheap.
+end-effector motion with Meta's action-conditioned V-JEPA 2 latent world model. A
+working local-checkpoint loader and CEM timing harness already live in
+``scripts/vjepa2_ac_infer_test.py``; this wrapper is the control-loop entry point still
+to be wired. Nothing in this module downloads or runs a network; the heavy imports
+(torch) happen lazily inside functions so importing this module stays cheap.
 
 Verified facts (arXiv:2506.09985 and facebookresearch/vjepa2)
 ------------------------------------------------------------
@@ -12,8 +13,8 @@ Verified facts (arXiv:2506.09985 and facebookresearch/vjepa2)
   single ``.pt`` at
   ``https://dl.fbaipublicfiles.com/vjepa2/vjepa2-ac-vitg.pt`` containing both an
   ``encoder`` and a ``predictor`` state dict, trained from the ViT-g encoder on
-  ~62 h of DROID robot video. Load via
-  ``torch.hub.load('facebookresearch/vjepa2', 'vjepa2_ac_vit_giant')``.
+  ~62 h of DROID robot video. Load the local file directly (the vendored repo's
+  ``torch.hub`` base URL is a localhost stub); see ``load_vjepa2_ac`` below.
 - Action: a real-valued 7-D end-effector delta -- 3 position, 3 extrinsic Euler
   orientation, 1 gripper (matches ``MujocoPilotEnv``'s state/action layout).
 - Planning: encode current frame -> ``z_k`` and goal image -> ``z_g`` with the
@@ -112,17 +113,22 @@ class VJEPA2ACWorldModel:
         )
 
 
-def load_vjepa2_ac(device: str = "cuda", source: str = "hub"):  # pragma: no cover
-    """Load the action-conditioned encoder + predictor (NOT called this session).
+def load_vjepa2_ac(device: str = "cuda", source: str = "local"):  # pragma: no cover
+    """Load the action-conditioned encoder + predictor (scaffold; see the working harness).
 
-    Kept for tomorrow's wiring. Imports torch lazily and would trigger a multi-GB
-    download on first use, so it is never invoked by tests or module import.
+    A working local-checkpoint loader and CEM timing harness already exist in
+    ``scripts/vjepa2_ac_infer_test.py``; this wrapper method is the control-loop entry point
+    still to be wired. Load the local checkpoint directly -- the vendored repo's torch.hub
+    base URL is a localhost stub -- and keep the encoder frozen.
     """
     import torch  # noqa: F401  (lazy; avoids importing torch on module load)
 
     raise NotImplementedError(
-        "Enable in a later session. Intended path:\n"
-        "  import torch\n"
-        "  enc, pred = torch.hub.load(*VJEPA2_AC_HUB)\n"
+        "Wire via the local checkpoint (see scripts/vjepa2_ac_infer_test.py):\n"
+        "  from src.hub.backbones import _make_vjepa2_ac_model, _clean_backbone_key\n"
+        "  enc, pred = _make_vjepa2_ac_model(model_name='vit_ac_giant', pretrained=False)\n"
+        "  state = torch.load(CHECKPOINT, map_location='cpu', weights_only=True)\n"
+        "  enc.load_state_dict(_clean_backbone_key(state['encoder']), strict=False)\n"
+        "  pred.load_state_dict(_clean_backbone_key(state['predictor']), strict=True)\n"
         "  return VJEPA2ACWorldModel(enc, pred, device)"
     )

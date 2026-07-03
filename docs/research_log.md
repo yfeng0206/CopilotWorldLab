@@ -13,7 +13,172 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-03 -- Second audit (code-auditor) + fixes
+
+#### 11. Re-audit follow-up: atomic action, remaining doc/wrapper fixes, coverage
+**Context**: A second read-only pass by the code-auditor confirmed the round-1 fixes and
+listed remaining items. Judge real vs. nit; apply the real ones; check whether any re-run
+changes the committed table.
+**Applied**: made the 7-D action atomic in `FrankaDroidEnv` -- an unreachable target
+(translation *or* orientation IK residual over tolerance) now rejects the whole action, arm
+and gripper both hold; added `ik_rot_fail_tol` (0.15 rad) and rotation gating of
+`last_action_ok`. Corrected the last "L1-ball" wording (`related_work.md`) to a per-axis
+box. Rewrote the stale `plan.md` next-steps (torch.hub / "first real inference" / already-
+done Franka integration) and removed a duplicated checklist line. Pointed the wrapper
+docstring at the local checkpoint and fixed its loader snippet (the vendored
+`_make_vjepa2_ac_model` is keyword-only). Added existing-file size validation to the
+downloader (`AC_EXPECTED_BYTES`). Added `tests/test_utils.py` (`latent_energy`, config
+loader). Noted `SESSION_CONTEXT.md` as historical; recorded the vendored `vjepa2` commit
+`204698b` for reproducibility.
+**Deferred (experiment stage)**: unified Franka+vial+holder scene, HF-encoder revision
+pinning, full SHA256 hashing, dependency pins.
+**Re-run**: full suite 25 -> **29 passed** (adds the utility tests); scripted reach still
+5/5; re-ran the inference harness (bare bf16 command) -- timings and planned action
+identical, so the committed timing table needed no value change.
+**References**: this session's code-auditor findings; `src/envs/franka_droid_env.py`,
+`docs/plan.md`, `src/world_model/vjepa2_wrapper.py`, `scripts/download_checkpoints.py`.
+
+#### 10. Cross-cutting code audit: triage and fixes, table unchanged
+**Context**: A second, broader audit (gpt-5.5 xhigh code-auditor, P0-P3) over the whole
+setup after the inference harness landed. Judge each finding real vs. nit, apply the real
+ones, and check whether anything needs re-running to update the committed timing table.
+**Triage / fixes** (real, applied): inference default was fp32 despite the documented bf16
+requirement (-> default bf16); `capture_goal_image` set the gripper command but `mj_forward`
+does not move the driven Robotiq fingers, so open/closed goals aliased (-> settle the
+gripper with a short physics rollout, state saved/restored, regression test added);
+`DEFAULT_MENAGERIE` was cwd-relative so `FrankaDroidEnv()` failed outside the repo root
+(-> anchor to repo root via `__file__`); the action bound was mis-documented as an "L1 ball"
+when the CEM clips each translation axis independently (a box / L-inf ball), and our env
+bounds the L2 norm instead (-> fixed the docs and flagged the box-vs-L2 mismatch for
+calibration); the checkpoint downloader had no integrity check (-> verify size ==
+Content-Length); stale docs (`architecture.md` "scaffold-only", `plan.md` TODOs) synced;
+`MujocoPilotEnv` camera default `wrist_cam` -> `scene_cam`.
+**Deferred (real, but the experiment stage, not defects)**: unified dynamic
+Franka+vial+holder scene, pinned vendored/HF revisions, broader test coverage, dependency
+pins.
+**Re-run**: full suite now 25 passed (adds the goal-preview gripper regression). Re-ran the
+inference harness with the bare (now bf16) command: identical timings (100/400/800 =
+4.4/16.4/32.7 s, peak 15.0 GiB) and identical planned action, so the committed table needs
+no value change -- only the audit/cleanup docs were updated.
+**References**: this session's code-auditor findings; `scripts/vjepa2_ac_infer_test.py`,
+`src/envs/franka_droid_env.py`, `src/envs/franka_build.py`, `scripts/download_checkpoints.py`.
+
 ### 2026-07-02 -- Stage-1 set-up: environment, repo restyle, MuJoCo scaffold
+
+#### 9. First V-JEPA 2-AC inference: logging, timing, and the 800-sample memory cliff
+**Context**: With the model verified, load it from the local checkpoint and time one planned
+action (encode context + goal, run CEM-MPC on the latent energy) against the paper's ~16 s
+on a 4090, using JEPA-style logging. Do a small-to-big sample sweep.
+**Setup**: `scripts/vjepa2_ac_infer_test.py` loads ViT-g encoder (strict=False, RoPE) +
+AC predictor (strict) from `checkpoints/vjepa2-ac-vitg.pt`, encodes the vendored
+`franka_example_traj.npz`, and runs `cem(...)` per config. Logging via `src/utils/logging.py`
+(CSV + file + console). Isolated from our own `src` by loading the logging module by file
+path before the vendored repo's top-level `src` shadows the package.
+**Investigation**:
+- fp32 is far slower than bf16: torch SDPA only fuses flash / mem-efficient attention in
+  fp16/bf16, so fp32 falls back to the math kernel. All timing below is bf16.
+- bf16 sweep (RTX 3090, samples x 10 iters x horizon 1) was linear up to 400 but then
+  exploded: 100 -> 4.4 s, 200 -> 8.1 s, 400 -> 15.9 s, **800 -> 148 s**.
+- Added a per-call breakdown (predictor GPU time vs pose CPU time). At 800 the predictor was
+  only 31 s and the CPU pose update 1.2 s -- so ~115 s was pure framework overhead, appearing
+  exactly when peak memory crossed ~12 -> 17 GiB. Classic CUDA allocator thrash: once the
+  activation working set is large enough, PyTorch issues synchronous cudaMalloc/cudaFree
+  every step. It was never a compute problem.
+**Solution**: chunk the CEM sample batch through the predictor (`--chunk`, default 200) so
+peak stays in the linear regime. Chunking is numerically identical (each sample is an
+independent batch row): the planned action is unchanged at `(+0.075, +0.075, +0.075, gripper
++0.675)`.
+**Outcome** (bf16, chunk=200, RTX 3090): 100 -> 4.4 s, 400 -> 16.1 s, **800 -> 32.0 s**
+(predictor 30.5 s, peak 15.0 GiB), a 4.6x speed-up at 800 with lower memory. 32 s on a 3090
+is consistent with the paper's 16 s on a 4090 (~1.8x faster GPU): timing reproduced. Model
+load 18 s, weights 5.0 GiB on GPU. CSV timings in `logs/vjepa2_ac_timing_*.csv`.
+**Audit** (rubber-duck, gpt-5.5 xhigh): no blockers; applied all four findings -- fail loudly
+on a genuine encoder checkpoint mismatch (keep `strict=False` per upstream but raise on
+unexpected keys or non-RoPE missing keys), harden the vendored-`src` isolation (evict repo
+root + any project `src*` modules before importing the vendored package), normalize the CUDA
+device (`torch.device` + `set_device`, so explicit `cuda:N` works), and load with
+`weights_only=True`. Re-validated: identical timings and planned action.
+**References**: arXiv:2506.09985 Sec 3 (CEM-MPC, ~16 s/action on 4090);
+facebookresearch/vjepa2 notebooks/utils/mpc_utils.py (`cem`, `compute_new_pose`),
+src/hub/backbones.py (`_make_vjepa2_ac_model`, `_clean_backbone_key`).
+
+#### 8. V-JEPA 2-AC compute analysis + fine-tuning plan (doc before code)
+**Context**: Before wiring inference, quantify param sizes and whether the model + a
+predictor fine-tune fit on the 24 GB 3090, and plan the fine-tune like the paper.
+**Findings** (measured from `checkpoints/vjepa2-ac-vitg.pt`): encoder 1.012B, predictor
+305M (both fp32); file also holds a `target_encoder` EMA copy + optimizer state (why it is
+11.76 GB). Training metadata: epoch 315, eff. batch 256, lr 4.25e-4. xformers is NOT needed
+(no import in the repo; ViT-g uses torch SDPA). Two integration snags: the cloned repo's
+`VJEPA_BASE_URL` is a localhost stub (so load our local checkpoint directly), and the
+vendored repo has its own top-level `src` that collides with ours (must isolate).
+**Budget (24 GiB)**: inference ~4 GiB (bf16); CEM 800 samples fits (paper used a 4090,
+same 24 GB); predictor fine-tune with frozen encoder ~8-12 GiB. Full end-to-end (unfreeze
+encoder) ~19-21 GiB just for optimizer/grad/params -> OOM, hence freeze the encoder.
+**Outcome**: wrote `docs/vjepa2_ac_architecture.md` (component tables, memory budget,
+fine-tune plan, integration boundary), structured like the OCT repo's architecture.md.
+**References**: arXiv:2506.09985 Sec 3; facebookresearch/vjepa2 src/hub/backbones.py,
+notebooks; checkpoint state_dict.
+
+#### 7. DROID-style Franka + Robotiq reproduction, robosuite eval, scripted reach, audit
+**Context**: Reproduce the paper's robot setup (Franka Panda + Robotiq 2F-85, exocentric
+camera, 7-D end-effector control) and pick a benchmark suite.
+**Investigation / decisions**:
+- Composed Franka `panda_nohand` + `robotiq_2f85` via MuJoCo `MjSpec` (mount at the arm
+  flange `attachment_site`); added table, floor, light, and a fixed `exo_cam`.
+- Added a differential-IK EE-space controller (`src/utils/ik.py`, damped least squares on
+  the site Jacobian) so a 7-D EE delta drives the arm; wrapped as `FrankaDroidEnv`.
+- Evaluated **robosuite** as the benchmark suite. It fits on paper (OSC = EE control,
+  Lift/PickPlace tasks, Robotiq grippers, `mujoco>=3.3.0` so no downgrade), BUT v1.5.2 is
+  incompatible with mujoco 3.10: its OSC controller calls `mj_fullM` with the old 2-arg
+  signature (3-arg in 3.10). Deferred; kept our own Franka+IK env.
+- Built `scripts/scripted_reach_test.py`: a physically-real prescripted reach (IK ->
+  data.ctrl -> mj_step, dynamic servos) to 5 targets with a marker; 5/5 reached, viewer +
+  headless.
+- Ran a rubber-duck audit (gpt-5.5, xhigh). Applied the clean fixes: EE control/state moved
+  from the flange to the Robotiq TCP `2f85_pinch` (the flange was ~15.6 cm off), restored
+  the elliptic friction cone + impratio after the spec merge, and made `solve_ik` return a
+  non-stale final residual. Deferred the bigger fix: make `apply_action` dynamically
+  stepped with a measured gripper opening (currently teleports; fine for reach, wrong for
+  grasp).
+**Outcome**: Franka+Robotiq loads/renders/controls in EE space; scripted reach passes 5/5;
+21 tests pass. robosuite set aside on version grounds.
+**References**: MuJoCo Menagerie franka_emika_panda + robotiq_2f85; robosuite v1.5.2
+setup.py (`mujoco>=3.3.0`); arXiv:2506.09985 Section 3-4; franka-audit findings.
+
+#### 6. Real Franka Panda in MuJoCo: bring-up + timing (no model)
+**Context**: First concrete Stage-1 milestone -- get the official Franka into MuJoCo,
+confirm it renders/actuates, and check sim timing against the paper's control cadence.
+**Investigation**: Sparse-checked-out `google-deepmind/mujoco_menagerie/franka_emika_panda`
+(into the gitignored `third_party/`). The model: dt=0.002, nq/nv/nu=9/9/8 (7 arm joints +
+2 tendon-coupled fingers; 7 position-servo actuators taking joint-angle targets + 1 gripper
+actuator, ctrl 0-255), end-effector = the `hand` body, a `home` keyframe, and NO camera
+defined. Wrote `scripts/franka_smoke_test.py`.
+**Outcome**: Loads, renders (256x256, saved to gitignored `outputs/franka_home.png`), and
+actuates correctly (commanding joint1 -> 0.6 rad moved the hand 32.8 cm). Timing on the
+RTX 3090 box: physics ~63k steps/s (~126x real-time), render ~783 fps, and a full
+16-frame / 4 s observation clip built in ~57 ms wall-clock. So MuJoCo is negligible next to
+the paper's ~16 s/action ViT-g CEM budget -- the model, not the simulator, is the
+bottleneck. Cadence maps cleanly: 0.25 s/action = 125 steps, 4 s clip = 2000 steps.
+**Next**: The Franka is joint-space position-controlled, but V-JEPA 2-AC emits 7-D EE-space
+deltas, so we need a pose->joint layer (differential IK via `mj_jac`, or a mocap target +
+weld) as the "Franka behind the 7-D interface" shim.
+**References**: MuJoCo Menagerie franka_emika_panda; arXiv:2506.09985 Section 3.1 (cadence).
+
+#### 5. Full re-read of the V-JEPA 2 paper (local PDF, 48 pp) -- calibration recipe found
+**Context**: Re-read the paper end-to-end to lock the interface before wiring inference.
+**Findings**: (a) CEM uses 800 samples, 10 iterations over the **top-10** (App. B.2) --
+our `PlannerConfig(top_k=10)` is already correct. (b) The model trains only on **left
+exocentric** (third-person) DROID views -- validates the pilot default camera `scene_cam`,
+not `wrist_cam`. (c) App. B.4 gives an **unsupervised calibration recipe**: the inferred
+action axis rotates ~linearly with camera angle (systematic ~1.6 cm error on a ~5 cm
+delta), removable by least-squares-fitting a 2x2 rotation `W*` from energy-inferred to
+executed (dx, dy) -- exactly our interface-calibration step. (d) The energy minimum is only
+*near* ground truth (Fig. 9: ~(0,-0.05) vs (0,-0.1)) -- a systematic offset the confidence
+gate must tolerate. (e) 'simulation' appears once, only in the Rubinstein CEM citation
+title -- confirms no simulator anywhere.
+**Outcome**: Updated `related_work.md` and `plan.md` (step 2) with the calibration recipe;
+no code change needed (config/planner already match).
+**References**: arXiv:2506.09985 Sections 3-4, App. B.2/B.4, Figs. 9/16.
 
 #### 4. V-JEPA 2-AC checkpoint acquired (download only)
 **Context**: Need the action-conditioned weights ready for next session without running

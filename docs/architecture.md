@@ -75,25 +75,31 @@ Notes:
 - A mocap end-effector proxy (palm + two finger geoms) carrying a downward `wrist_cam`.
 - A fixed `scene_cam` aimed at the workspace.
 
-## 3. `VJEPA2ACWorldModel` (`src/world_model/vjepa2_wrapper.py`) -- scaffold
+## 3. `VJEPA2ACWorldModel` (`src/world_model/vjepa2_wrapper.py`)
 
-Interface only this session; no network is loaded or run. It records the verified facts
-needed to wire it up next session and defines the methods the control loop will call.
+The control-loop wrapper is still a thin scaffold, but the model now loads and runs: a
+working local-checkpoint loader and CEM-MPC timing harness live in
+`scripts/vjepa2_ac_infer_test.py` (see `docs/setup_stage.md` for the measured timings).
+The wrapper defines the methods the control loop will call:
 
 | Method | Purpose | Status |
 |---|---|---|
-| `encode(frames)` | frames -> latent `z` (frozen ViT-g, per-frame 16x16x1408) | scaffold |
-| `predict(latent, state, actions)` | action-conditioned rollout `P(a; s, z)` | scaffold |
+| `encode(frames)` | frames -> latent `z` (frozen ViT-g, per-frame 16x16x1408) | in harness |
+| `predict(latent, state, actions)` | action-conditioned rollout `P(a; s, z)` | in harness |
 | `latent_energy(pred, goal)` | `mean(|pred - goal|)` = the gate signal | implemented (pure array op) |
-| `plan_action(obs, goal_image, config)` | CEM MPC to a goal image | scaffold |
-| `load_vjepa2_ac(device, source)` | `torch.hub.load(...)` loader | scaffold (never called this session) |
+| `plan_action(obs, goal_image, config)` | CEM MPC to a goal image | in harness (not yet in the env loop) |
+| `load_vjepa2_ac(device, source)` | local-checkpoint loader | wired in the harness; wrapper method still a stub |
 
-Verified loading path (for next session):
+Working loading path (implemented in the harness; not `torch.hub`, whose base URL in the
+vendored repo is a localhost stub):
 
 ```python
 import torch
-encoder, predictor = torch.hub.load("facebookresearch/vjepa2", "vjepa2_ac_vit_giant")
-# checkpoint: https://dl.fbaipublicfiles.com/vjepa2/vjepa2-ac-vitg.pt  (encoder + predictor)
+from src.hub.backbones import _make_vjepa2_ac_model, _clean_backbone_key  # vendored repo
+encoder, predictor = _make_vjepa2_ac_model("vit_ac_giant", pretrained=False)
+state = torch.load("checkpoints/vjepa2-ac-vitg.pt", map_location="cpu", weights_only=True)
+encoder.load_state_dict(_clean_backbone_key(state["encoder"]), strict=False)   # RoPE-tolerant
+predictor.load_state_dict(_clean_backbone_key(state["predictor"]), strict=True)
 ```
 
 ## 4. Planner (`PlannerConfig`)
@@ -107,9 +113,11 @@ Cross-Entropy-Method MPC; defaults follow the V-JEPA 2-AC paper (Table 3):
 | `horizon` | 1 | paper (greedy one-step + receding horizon) |
 | `top_k` | 10 | our default (paper: "top-k", exact k in appendix) |
 
-Additional replication knobs recorded for later: action sampling constrained to an
-L1-ball of radius ~0.075 (~13 cm max displacement/action), 4 fps action rate, 256x256
-input. Reported latency ~16 s/action on an RTX 4090.
+Additional replication knobs (verified against the reference CEM): each translation axis
+is sampled and clipped independently to `[-0.075, 0.075]` m -- an axis-aligned box (L-inf
+ball), not an L1 ball, so up to ~13 cm Euclidean displacement per action; rotation is
+zeroed and the gripper is sampled. 4 fps action rate, 256x256 input. Reported latency
+~16 s/action on an RTX 4090.
 
 ## 5. The confidence gate
 

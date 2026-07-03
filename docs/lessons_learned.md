@@ -67,3 +67,94 @@ not sneak back in.
 - **Rule**: `.gitignore` covers `*token*.txt`, `checkpoints/`, `data/`, `.venv/`,
   `third_party/`, `*.docx`, the proposal workflow (`scripts/proposal/`, `fig_*.png`) and
   the local `CHANGELOG.md`. The committed tree is code + docs only.
+
+---
+
+## Simulation and control (Franka / robosuite)
+
+### 9. The end-effector site must be the gripper TCP, not the arm flange
+- **What happens**: Attaching Robotiq to the Panda leaves the arm's `attachment_site`
+  (flange) at ~15.6 cm above the actual grasp point. Controlling/measuring the flange
+  makes wrist rotations move the grasp point incorrectly.
+- **Rule**: Use the gripper TCP (`2f85_pinch`) as the EE site for control and state. Keep
+  `attachment_site` only as the mount point for the spec merge.
+
+### 10. mjSpec merge drops the child's physics options; re-set them after merging
+- **What happens**: Attaching `robotiq_2f85` (elliptic friction cone, impratio 10) onto the
+  Panda keeps the parent's pyramidal cone; a warning is printed and the gripper's intended
+  contact model is silently lost.
+- **Rule**: After `attach_body`, explicitly set `spec.option.cone = mjCONE_ELLIPTIC` and
+  `spec.option.impratio` before `compile()`. Verify on the compiled model (`m.opt.cone`).
+
+### 11. robosuite 1.5.2 is incompatible with mujoco 3.10
+- **What happens**: `robosuite.make(...).reset()` raises `TypeError: mj_fullM(): incompatible
+  function arguments` -- robosuite's OSC controller calls `mj_fullM(model, dst, qM)` (old
+  2-arg-ish form) but mujoco 3.10 requires `mj_fullM(model, data, dst)`.
+- **Rule**: robosuite needs a mujoco version matching its release (~3.3.x). Our stack pins
+  mujoco 3.10 (torch + our env), so we use our own Franka+IK env; only adopt robosuite in a
+  separate env or once it supports 3.10.
+
+### 12. Differential IK returns a stale residual unless recomputed after the loop
+- **What happens**: The residual is computed at the top of each iteration, before the last
+  joint update; on a non-converged solve the returned error is one step stale.
+- **Rule**: After the IK loop, recompute forward kinematics and the residual for the final
+  configuration before returning it. Callers use the residual to detect failed solves.
+
+### 13. Large model weights live on D: via a directory junction
+- **What happens**: C: (231 GB) fills up with the 11 GB checkpoint plus caches; D: has
+  1.3 TB free.
+- **Rule**: The checkpoint lives at `D:\CopilotWorldLab\checkpoints\`; the repo's
+  `checkpoints/` is a Windows junction pointing there, so relative paths like
+  `checkpoints/vjepa2-ac-vitg.pt` work unchanged. Future model downloads go to D: via
+  `TORCH_HOME` / `HF_HOME` (set to `D:\CopilotWorldLab\cache\...`). Do not commit the
+  junction target; `checkpoints/` is already gitignored.
+
+---
+
+## V-JEPA 2-AC inference (CEM planning)
+
+### 14. fp32 disables flash attention; always plan in bf16
+- **What happens**: Running the ViT-g predictor in fp32 is several times slower than bf16
+  for the same CEM config.
+- **Why**: torch's scaled-dot-product-attention only dispatches the fused flash /
+  mem-efficient kernels for fp16/bf16; fp32 falls back to the slow math kernel.
+- **Rule**: Wrap encode + CEM in `torch.autocast(device, dtype=torch.bfloat16)`. bf16 is
+  the intended inference precision for this model.
+
+### 15. High CEM sample counts hit a CUDA allocator cliff; chunk the predictor batch
+- **What happens**: bf16 timing was linear up to 400 samples (~0.04 s/sample) then jumped
+  from an expected ~32 s to **148 s** at 800 samples on the 24 GB 3090. A predictor-vs-pose
+  breakdown showed the predictor was still only 31 s and the CPU pose update 1.2 s -- ~115 s
+  was framework overhead that appeared exactly when peak memory crossed ~12 -> 17 GiB.
+- **Why**: once the activation working set is large enough that the allocator cache cannot
+  serve a request, PyTorch falls back to synchronous `cudaMalloc`/`cudaFree` per step
+  (allocator thrash). It is a memory-pressure artifact, not extra compute.
+- **Rule**: chunk the CEM sample batch through the predictor (`--chunk`, default 200) so
+  peak stays in the linear regime. Chunking is numerically identical (each sample is an
+  independent batch row) -- verified the planned action is unchanged. Result: 800 samples
+  drop to 32 s (predictor-bound) at 15 GiB peak. Do NOT set
+  `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` on Windows; it is unsupported there and
+  only prints a warning.
+
+---
+
+## Simulation and world-model interface
+
+### 16. `mj_forward` does not integrate actuators; step physics to preview a driven gripper
+- **What happens**: `capture_goal_image` set the Robotiq gripper command and called
+  `mj_forward`, but open- and closed-gripper goal images rendered identically.
+- **Why**: `mj_forward` computes kinematics/dynamics for the current state; it does not
+  advance actuators toward their targets. The 2F-85 fingers are a driven linkage, so their
+  qpos only moves when the physics is stepped.
+- **Rule**: to preview any position-actuated part (the gripper), briefly `mj_step` with the
+  command set (save and restore `qpos`/`qvel`/`ctrl`), do not rely on `mj_forward` after
+  writing `data.ctrl`. Covered by `test_goal_image_reflects_gripper_state`.
+
+### 17. The V-JEPA CEM action bound is a per-axis box, and our env clamps the L2 norm
+- **What happens**: docs called `maxnorm = 0.075` an "L1 ball". It is not.
+- **Why**: the reference CEM clips each translation axis independently to
+  `[-maxnorm, maxnorm]` (an axis-aligned box / L-inf ball, ~13 cm Euclidean diagonal) and
+  zeros rotation, whereas `FrankaDroidEnv` bounds the L2 norm of the translation to
+  `max_translation` (0.13 m) -- a different constraint shape.
+- **Rule**: describe the CEM bound as a box, not an L1 ball, and reconcile the box (CEM) vs.
+  L2 (env) translation limits during interface calibration before any zero-shot transfer.

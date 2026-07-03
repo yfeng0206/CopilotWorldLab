@@ -27,10 +27,12 @@ The substrate for our coarse controller.
   rollout loss.
 - **Planning.** Given a single goal image encoded to `z_g`, minimise the latent energy
   `E = ||P(a; s_k, z_k) - z_g||_1` (Eq. 5) with the Cross-Entropy Method (population 800,
-  10 iterations, horizon 1), execute the first action, re-plan (receding horizon).
-  ~16 s/action on one RTX 4090 (Table 3). Action sampling constrained to an L1-ball of
-  radius ~0.075 (~13 cm). The energy landscape is reported "smooth and locally convex"
-  with the minimum near the ground-truth action (Fig. 9).
+  10 iterations refining the top-10 samples, horizon 1; App. B.2), execute the first
+  action, re-plan (receding horizon). ~16 s/action on one RTX 4090 (Table 3). Action
+  sampling clips each translation axis independently to `[-0.075, 0.075]` (a box / L-inf
+  ball, ~13 cm diagonal), not an L1-ball. The energy landscape is
+  reported "smooth and locally convex" (Fig. 9), though its minimum is only *near* the
+  ground-truth action, not exactly on it (min ~(0,-0.05) vs truth (0,-0.1)).
 - **Zero-shot transfer.** Deployed zero-shot on Franka arms in two labs not in DROID,
   with an uncalibrated monocular RGB camera, no task-specific training and no reward
   (Section 4.1). Success (Table 2, avg of two labs): Reach 100%, Grasp Cup 65%, Grasp Box
@@ -39,9 +41,19 @@ The substrate for our coarse controller.
 - **Stated limitations.** Camera/coordinate-frame sensitivity (must infer the action axis
   from monocular RGB); long-horizon autoregressive drift; dependence on image goals;
   precision is the gating factor for grasps; 16 s/action latency; monocular RGB only.
+- **Camera sensitivity + a calibration recipe (App. B.4).** The model is trained only on
+  *left exocentric* (third-person) DROID views and must infer the action coordinate axis
+  from the monocular RGB image; the inferred axis rotates roughly linearly with camera
+  angle (Fig. 16) -- a systematic ~1.6 cm error on a ~5 cm delta. Because the error map
+  `W*` is essentially a pure rotation (condition number ~1.5), it can be removed by an
+  unsupervised calibration: drive random actions, least-squares-fit the 2x2 map from
+  energy-inferred to executed (dx, dy), and rotate inferred actions by `W*` before use.
+  The authors describe but do not apply this. It is directly our interface-calibration
+  step, and it argues for a third-person camera rather than a wrist camera.
 - **Flag (decisive for us).** The paper does **not** implement any energy-threshold
   confidence or handoff gate. Using the energy magnitude as a competence gate is our
-  addition; the smooth/convex landscape is encouraging but not evidence for the gate.
+  addition; the smooth/convex landscape is encouraging but not evidence for the gate, and
+  the energy minimum carries a systematic offset, so the gate must be robust to that.
 
 **How ours differs.** We reuse this exact energy and CEM planner for coarse motion, then
 add what the paper lacks: the energy as a competence gate that hands off to a classical

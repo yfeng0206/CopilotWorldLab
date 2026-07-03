@@ -48,3 +48,6 @@ third_party/
 .DS_Store
 Thumbs.db
 _tmp_*
+
+# MuJoCo runtime log
+MUJOCO_LOG.TXT
