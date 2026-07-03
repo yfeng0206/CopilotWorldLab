@@ -20,13 +20,13 @@ measurement, before any physical hardware.
 
 ## Immediate next steps (next session)
 
-Ordered to fail fast on the cheapest layer first, before spending slow GPU-hours on full
-MPC (at ~16 s/action, large-N CEM trials are expensive on one 3090):
+Done so far: the encoder + AC predictor load from the local checkpoint and CEM latency is
+measured (`scripts/vjepa2_ac_infer_test.py`, bf16, ~32 s at 800 samples on the 3090); the
+Franka + Robotiq env (`FrankaDroidEnv`) supplies real arm/gripper dynamics behind the 7-D
+interface. Remaining, ordered to fail fast on the cheapest layer first (large-N CEM is slow
+on one 3090):
 
-1. **Encoder sanity.** Wire `VJEPA2ACWorldModel` to `checkpoints/vjepa2-ac-vitg.pt` via
-   `torch.hub`; encode a single rendered 256x256 frame and confirm latent shape
-   (16x16x1408). First real inference.
-2. **One-step interface calibration.** Generate known sim transitions
+1. **One-step interface calibration.** Generate known sim transitions
    `(x_k, s_k, a_gt, x_{k+1})`; score candidate deltas through the predictor and confirm
    `a_gt` is ranked near the latent-energy minimum. Sweep world- vs body-frame, per-axis
    sign, and translation/rotation scale until the ground-truth action wins. This mirrors
@@ -35,16 +35,13 @@ MPC (at ~16 s/action, large-N CEM trials are expensive on one 3090):
    a 2x2 map `W*` (they find it is ~a rotation, condition number ~1.5, ~1.6 cm systematic
    error), and correct inferred actions by `W*` before use. Use the third-person
    `scene_cam` -- the model was trained only on exocentric DROID views.
-3. **Camera / cadence ablation.** Repeat (2) with `scene_cam` (third-person, DROID-like)
+2. **Camera / cadence ablation.** Repeat (1) with `scene_cam` (third-person, DROID-like)
    vs `wrist_cam`, and with the action interval aligned to ~4 fps (~0.25 s) rather than a
    single sim step. Lock in the interface before planning.
-4. **Trivial CEM reach.** Only now implement `plan_action` (following
-   `facebookresearch/vjepa2/notebooks/utils/mpc_utils.py`); validate the energy decreases
-   toward a captured goal image on a one-step reach. Measure latency on the 3090.
-5. **Franka integration.** Swap the mocap end-effector for a Franka from MuJoCo Menagerie
-   behind the same 7-D interface (pose->IK shim), adding real arm/gripper dynamics before
-   any confidence-gate conclusions.
-6. **Trial harness + gate data.** Sample a goal pose, perturb the start pose synthetically
+3. **CEM reach to a goal image, in the env loop.** Wire `plan_action` (following
+   `facebookresearch/vjepa2/notebooks/utils/mpc_utils.py`) into the Franka env and validate
+   the energy decreases toward a captured goal image on a one-step reach.
+4. **Trial harness + gate data.** Sample a goal pose, perturb the start pose synthetically
    (standing in for docking error), plan, and log terminal energy, the confound baselines
    (below), and the success label.
 
@@ -55,8 +52,6 @@ MPC (at ~16 s/action, large-N CEM trials are expensive on one 3090):
 - [x] V-JEPA 2-AC interface scaffold and download-only checkpoint fetch.
 - [x] Test suite (geometry, env kinematics, render) passing.
 - [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
-- [x] Franka + Robotiq 2F-85 composed (mjSpec), exocentric camera, EE-space control via
-      differential IK (`FrankaDroidEnv`); scripted reach test passes 5/5.
 - [x] Franka + Robotiq 2F-85 composed (mjSpec), exocentric camera, EE-space control via
       differential IK (`FrankaDroidEnv`); scripted reach test passes 5/5.
 - [x] `apply_action` dynamically stepped (IK -> ctrl -> mj_step) with a measured gripper

@@ -15,6 +15,29 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ### 2026-07-03 -- Second audit (code-auditor) + fixes
 
+#### 11. Re-audit follow-up: atomic action, remaining doc/wrapper fixes, coverage
+**Context**: A second read-only pass by the code-auditor confirmed the round-1 fixes and
+listed remaining items. Judge real vs. nit; apply the real ones; check whether any re-run
+changes the committed table.
+**Applied**: made the 7-D action atomic in `FrankaDroidEnv` -- an unreachable target
+(translation *or* orientation IK residual over tolerance) now rejects the whole action, arm
+and gripper both hold; added `ik_rot_fail_tol` (0.15 rad) and rotation gating of
+`last_action_ok`. Corrected the last "L1-ball" wording (`related_work.md`) to a per-axis
+box. Rewrote the stale `plan.md` next-steps (torch.hub / "first real inference" / already-
+done Franka integration) and removed a duplicated checklist line. Pointed the wrapper
+docstring at the local checkpoint and fixed its loader snippet (the vendored
+`_make_vjepa2_ac_model` is keyword-only). Added existing-file size validation to the
+downloader (`AC_EXPECTED_BYTES`). Added `tests/test_utils.py` (`latent_energy`, config
+loader). Noted `SESSION_CONTEXT.md` as historical; recorded the vendored `vjepa2` commit
+`204698b` for reproducibility.
+**Deferred (experiment stage)**: unified Franka+vial+holder scene, HF-encoder revision
+pinning, full SHA256 hashing, dependency pins.
+**Re-run**: full suite 25 -> **29 passed** (adds the utility tests); scripted reach still
+5/5; re-ran the inference harness (bare bf16 command) -- timings and planned action
+identical, so the committed timing table needed no value change.
+**References**: this session's code-auditor findings; `src/envs/franka_droid_env.py`,
+`docs/plan.md`, `src/world_model/vjepa2_wrapper.py`, `scripts/download_checkpoints.py`.
+
 #### 10. Cross-cutting code audit: triage and fixes, table unchanged
 **Context**: A second, broader audit (gpt-5.5 xhigh code-auditor, P0-P3) over the whole
 setup after the inference harness landed. Judge each finding real vs. nit, apply the real

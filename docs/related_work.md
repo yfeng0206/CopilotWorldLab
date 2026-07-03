@@ -29,7 +29,8 @@ The substrate for our coarse controller.
   `E = ||P(a; s_k, z_k) - z_g||_1` (Eq. 5) with the Cross-Entropy Method (population 800,
   10 iterations refining the top-10 samples, horizon 1; App. B.2), execute the first
   action, re-plan (receding horizon). ~16 s/action on one RTX 4090 (Table 3). Action
-  sampling constrained to an L1-ball of radius ~0.075 (~13 cm). The energy landscape is
+  sampling clips each translation axis independently to `[-0.075, 0.075]` (a box / L-inf
+  ball, ~13 cm diagonal), not an L1-ball. The energy landscape is
   reported "smooth and locally convex" (Fig. 9), though its minimum is only *near* the
   ground-truth action, not exactly on it (min ~(0,-0.05) vs truth (0,-0.1)).
 - **Zero-shot transfer.** Deployed zero-shot on Franka arms in two labs not in DROID,

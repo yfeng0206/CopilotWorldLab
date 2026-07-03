@@ -1,5 +1,11 @@
 # Session context and handoff
 
+> Note (2026-07-03): this is an early handoff note. For the current status and the
+> reproducible record of the completed setup, see [`docs/setup_stage.md`](setup_stage.md);
+> for the live roadmap see [`docs/plan.md`](plan.md). Sections below that describe the
+> repository layout or build steps in terms of the proposal generators are historical --
+> those files are now local-only / gitignored.
+
 This document lets a fresh AI coding session pick up this project without the
 prior chat history. It captures the design, the novelty audit (with verified
 citations), the open design decision, and the pending edits. It is a working

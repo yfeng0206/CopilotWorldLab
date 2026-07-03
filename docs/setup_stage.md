@@ -18,7 +18,7 @@ Verified on Windows 11, RTX 3090 (24 GB), CUDA 12.4 wheel, Python 3.11. Committe
 | Repo restructure | Branch `world-model-pilot` mirroring I-JEPA_3D_OCT doc discipline; proposal generators kept local/gitignored | Done | PR #1 |
 | GitHub identity | `gh` auth and all commits as `yfeng0206` (not an org identity) | Done | commits `abeaad6`, `edcf011` |
 | Franka DROID env | Franka Panda + Robotiq 2F-85 composed via `mjSpec`; dynamic 7-DoF end-effector control (differential IK -> `ctrl` -> `mj_step`), measured gripper, TCP at `2f85_pinch` | Done | `src/envs/franka_build.py`, `src/envs/franka_droid_env.py`, `src/utils/ik.py` |
-| Test suite | Model, kinematics, and render tests; render tests skip (not fail) without a GL context | Done (25 passed) | `tests/`, `pytest.ini` |
+| Test suite | Model, kinematics, render, and pure-utility tests; render tests skip (not fail) without a GL context | Done (29 passed) | `tests/`, `pytest.ini` |
 | V-JEPA 2-AC checkpoint | Verified public/ungated; downloaded 11 GB; relocated to `D:` via a directory junction | Done | `checkpoints/` junction; lessons #6, #13 |
 | V-JEPA 2-AC loading | ViT-g encoder (1.01B) + AC predictor (305M) load from the local `.pt` with a fail-loud mismatch guard; namespace-isolated from the vendored `src` | Done | `scripts/vjepa2_ac_infer_test.py` |
 | Logging | JEPA-style logging (`get_logger`, `CSVLogger`, `AverageMeter`, `gpu_timer`, `grad_logger`) mirrored from I-JEPA_3D_OCT | Done | `src/utils/logging.py` |
@@ -87,9 +87,28 @@ inference table is unchanged -- the bf16 numbers were already the reported ones)
 
 Deferred to the experiment stage (real observations, not defects): a unified dynamic
 Franka + vial + holder scene for end-to-end grasp/insert (that is the first experiment
-env), pinned vendored-code / HuggingFace revisions, broader test coverage (energy, config,
-logging), and tighter dependency pins. Lower-priority nits (doc wording, older-scaffold
-action-bound enforcement) are noted in `docs/lessons_learned.md`.
+env), HuggingFace-encoder revision pinning, and tighter dependency pins. Lower-priority
+nits (doc wording, older-scaffold action-bound enforcement) are noted in
+`docs/lessons_learned.md`.
+
+### Re-audit follow-up (code-auditor, gpt-5.5 xhigh)
+
+A second read-only pass confirmed the fixes above and surfaced remaining items; applied the
+real ones (suite now **29 tests pass**, inference table still unchanged):
+
+| Area | Finding | Fix |
+|---|---|---|
+| 7-D action atomicity | Gripper applied before IK acceptance, and `last_action_ok` ignored orientation | The action is now atomic -- on an unreachable target (position *or* orientation residual over tolerance) neither arm nor gripper move; added `ik_rot_fail_tol`. Reach still 5/5 |
+| Remaining "L1-ball" | `docs/related_work.md` still said L1-ball | Corrected to a per-axis box / L-inf |
+| Stale plan/handoff | `docs/plan.md` still said "wire via torch.hub / first real inference", listed done work as next, and duplicated a checklist line | Rewrote the next-steps list to current reality; de-duplicated |
+| Wrapper guidance | Top docstring still said "load via torch.hub"; the local-loader snippet used a positional arg, but `_make_vjepa2_ac_model` is keyword-only | Point to the local checkpoint; fixed the snippet to keyword args |
+| Existing-file integrity | The downloader accepted an existing checkpoint without validation | Verify size against the known `AC_EXPECTED_BYTES` (11,760,743,310) for existing and freshly downloaded files |
+| Test coverage | No tests for `latent_energy` / the config loader | Added `tests/test_utils.py` |
+
+Reproducibility pin: the vendored `facebookresearch/vjepa2` is at commit `204698b`
+(2026-03-23); the MuJoCo Menagerie is fetched via the sparse clone documented in
+`src/envs/franka_build.py`. HuggingFace-encoder revision pinning and full SHA256 hashing
+remain deferred (encoders are not yet used; the size check catches truncation/corruption).
 
 ## 4. What this stage does NOT include (the experiments)
 

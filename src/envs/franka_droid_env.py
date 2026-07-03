@@ -42,7 +42,8 @@ GRIPPER_CTRL_MAX = 255.0  # Robotiq 2F-85: ctrl 0 = open, 255 = closed
 CONTROL_SUBSTEPS = 125    # ~0.25 s at dt=0.002: one action == one paper control step (4 fps)
 MAX_TRANSLATION = 0.13    # metres per action (paper constrains actions to ~13 cm)
 MAX_ROTATION = 0.5        # radians per action (keep orientation deltas bounded)
-IK_FAIL_TOL = 0.02        # metres: reject an action whose IK solution misses by > 2 cm
+IK_FAIL_TOL = 0.02        # metres: reject an action whose translation IK residual exceeds this
+IK_ROT_FAIL_TOL = 0.15    # radians (~8.6 deg): reject an action whose orientation IK residual exceeds this
 GRIPPER_SETTLE_STEPS = 100  # physics steps to reach a commanded gripper opening in goal previews
 
 
@@ -58,6 +59,7 @@ class FrankaDroidEnv:
         max_translation: float = MAX_TRANSLATION,
         max_rotation: float = MAX_ROTATION,
         ik_fail_tol: float = IK_FAIL_TOL,
+        ik_rot_fail_tol: float = IK_ROT_FAIL_TOL,
         seed: int = 0,
     ) -> None:
         import mujoco
@@ -78,6 +80,7 @@ class FrankaDroidEnv:
         self.max_translation = float(max_translation)
         self.max_rotation = float(max_rotation)
         self.ik_fail_tol = float(ik_fail_tol)
+        self.ik_rot_fail_tol = float(ik_rot_fail_tol)
         self.rng = np.random.default_rng(seed)
 
         self._site = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, EE_SITE)
@@ -127,11 +130,13 @@ class FrankaDroidEnv:
         self._gripper_cmd = float(np.clip(value, 0.0, 1.0))
         self.data.ctrl[self._grip_act] = self._gripper_cmd * GRIPPER_CTRL_MAX
 
-    def _drive_dynamic(self, target_pos, target_quat, substeps=None) -> tuple:
+    def _drive_dynamic(self, target_pos, target_quat, gripper_delta=0.0, substeps=None) -> tuple:
         """Real control path: IK -> joint targets in data.ctrl -> step the physics.
 
-        An action whose IK solution is unreachable (residual > ``ik_fail_tol``) is
-        rejected: the joint targets are not updated and the arm holds while the sim steps.
+        The 7-D action is atomic: if the target is unreachable (translation residual
+        > ``ik_fail_tol`` or orientation residual > ``ik_rot_fail_tol``) the whole action is
+        rejected -- neither the arm joint targets nor the gripper command are updated, and
+        the arm holds while the sim steps.
         """
         substeps = self.control_substeps if substeps is None else int(substeps)
         q, pos_err, rot_err = ik_solver.solve_ik(
@@ -139,9 +144,10 @@ class FrankaDroidEnv:
             q_init=self.data.qpos[:ARM_DOF], arm_dof=ARM_DOF, iters=self.ik_iters,
         )
         self.last_ik_pos_err, self.last_ik_rot_err = pos_err, rot_err
-        self.last_action_ok = pos_err <= self.ik_fail_tol
+        self.last_action_ok = pos_err <= self.ik_fail_tol and rot_err <= self.ik_rot_fail_tol
         if self.last_action_ok:
             self.data.ctrl[:ARM_DOF] = q
+            self._set_gripper_cmd(self._gripper_cmd + gripper_delta)
         for _ in range(substeps):
             self._mujoco.mj_step(self.model, self.data)
         return pos_err, rot_err
@@ -172,15 +178,16 @@ class FrankaDroidEnv:
     def apply_action(self, delta, frame: str = "world") -> np.ndarray:
         """Apply a 7-D EE delta ``[dx,dy,dz, dR,dP,dY, dgrip]`` dynamically; return state.
 
-        Translation is clamped to ``max_translation`` and rotation to ``max_rotation`` per
-        action. The arm is driven by the position servos over ``control_substeps`` physics
-        steps, so the result is physically consistent (contacts, gravity, grasp). Inspect
-        ``last_action_ok`` / ``last_ik_pos_err`` to detect a rejected (unreachable) action.
-        ``last_action_ok`` reflects translation reachability only; read ``last_ik_rot_err``
-        for orientation error. The gripper command is applied independently of whether the
-        arm move was accepted.
+        Translation is clamped to ``max_translation`` (by L2 norm) and rotation to
+        ``max_rotation`` per action. The arm is driven by the position servos over
+        ``control_substeps`` physics steps, so the result is physically consistent (contacts,
+        gravity, grasp). The action is atomic: if the target is unreachable
+        (``last_action_ok`` is False, i.e. ``last_ik_pos_err > ik_fail_tol`` or
+        ``last_ik_rot_err > ik_rot_fail_tol``) neither the arm nor the gripper move.
         """
         delta = np.asarray(delta, dtype=np.float64).reshape(STATE_DIM)
+        # Local convention: bound the L2 norm of the translation. The reference V-JEPA CEM
+        # instead clips each xyz axis independently (a box); reconcile at interface calibration.
         trans = delta[:3].copy()
         t_norm = float(np.linalg.norm(trans))
         if t_norm > self.max_translation:
@@ -195,8 +202,7 @@ class FrankaDroidEnv:
         dquat = geo.euler_xyz_to_quat(*rot)
         target_quat = (geo.quat_mul(dquat, cur_quat) if frame == "world"
                        else geo.quat_mul(cur_quat, dquat))
-        self._set_gripper_cmd(self._gripper_cmd + delta[6])
-        self._drive_dynamic(target_pos, geo.quat_normalize(target_quat))
+        self._drive_dynamic(target_pos, geo.quat_normalize(target_quat), gripper_delta=delta[6])
         return self.get_ee_state()
 
     # --------------------------------------------------------------- rendering

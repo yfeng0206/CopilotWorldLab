@@ -26,6 +26,7 @@ import urllib.error
 import urllib.request
 
 AC_URL = "https://dl.fbaipublicfiles.com/vjepa2/vjepa2-ac-vitg.pt"
+AC_EXPECTED_BYTES = 11_760_743_310  # verified size of the released AC checkpoint (~10.95 GiB)
 ENCODERS = {
     "vitl": "facebook/vjepa2-vitl-fpc64-256",
     "vith": "facebook/vjepa2-vith-fpc64-256",
@@ -113,12 +114,20 @@ def main() -> None:
 
     if args.ac:
         dest = os.path.join(args.dest, os.path.basename(AC_URL))
-        if os.path.exists(dest):
-            print(f"[ac] already present: {dest} ({_human(os.path.getsize(dest))})")
+        if os.path.exists(dest) and os.path.getsize(dest) == AC_EXPECTED_BYTES:
+            print(f"[ac] already present and size-verified: {dest} ({_human(os.path.getsize(dest))})")
         else:
-            print(f"[ac] {AC_URL}")
+            if os.path.exists(dest):
+                print(f"[ac] size mismatch ({_human(os.path.getsize(dest))} != "
+                      f"{_human(AC_EXPECTED_BYTES)}); re-downloading")
+            else:
+                print(f"[ac] {AC_URL}")
             download_stream(AC_URL, dest)
-            print(f"[ac] saved {dest} ({_human(os.path.getsize(dest))})")
+            size = os.path.getsize(dest)
+            if size != AC_EXPECTED_BYTES:
+                raise IOError(f"[ac] {dest} is {_human(size)}, expected "
+                              f"{_human(AC_EXPECTED_BYTES)}; download may be corrupt")
+            print(f"[ac] saved and size-verified {dest} ({_human(size)})")
 
     if args.encoder != "none":
         download_encoder(ENCODERS[args.encoder], args.dest)
