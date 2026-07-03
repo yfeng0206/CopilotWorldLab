@@ -33,18 +33,21 @@ closest prior art.
 
 ## Status
 
-Stage-1 pilot, set-up phase. This session established a reproducible local environment
-and a minimal MuJoCo scaffold that exposes exactly the interface the world model will
-consume. No world-model inference has been run yet.
+Stage-1 pilot, pre-experiment setup stage -- complete. This session established a
+reproducible local environment, a DROID-style Franka arm in MuJoCo, verified loading of
+the V-JEPA 2-AC checkpoint, and a characterized inference/timing baseline on the 24 GB
+RTX 3090. No closed-loop world-model control has been run yet; that is the first
+experiment. See [`docs/setup_stage.md`](docs/setup_stage.md) for the full record (setup
+milestones, the timing table, and the audit/cleanup log).
 
-Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 15/15 tests passing):
+Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 24/24 tests passing):
 
-- A minimal MuJoCo tabletop scene (vial, holder well, mocap end-effector, two cameras).
-- `MujocoPilotEnv`: headless RGB rendering, a 7-DoF end-effector state/action interface
-  matching the V-JEPA 2-AC 7-DoF layout, and goal-image capture.
-- A download-only checkpoint fetcher and a one-command environment setup script.
-- A V-JEPA 2-AC wrapper scaffold that records the verified inference interface but runs
-  no network (wired up next session).
+- A DROID-style Franka Panda + Robotiq 2F-85 MuJoCo env (`FrankaDroidEnv`) with dynamic
+  7-DoF end-effector control matching the V-JEPA 2-AC action layout.
+- Local V-JEPA 2-AC loading (ViT-g encoder 1.01B + AC predictor 305M) and a CEM-MPC
+  inference/timing harness: 800-sample planning in 32 s at 15 GiB (bf16, chunked),
+  consistent with the paper's 16 s on a ~1.8x-faster 4090.
+- JEPA-style logging, a download-only checkpoint fetcher, and a one-command setup script.
 
 ## Repository layout
 
