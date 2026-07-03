@@ -40,7 +40,7 @@ RTX 3090. No closed-loop world-model control has been run yet; that is the first
 experiment. See [`docs/setup_stage.md`](docs/setup_stage.md) for the full record (setup
 milestones, the timing table, and the audit/cleanup log).
 
-Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 25/25 tests passing):
+Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 29/29 tests passing):
 
 - A DROID-style Franka Panda + Robotiq 2F-85 MuJoCo env (`FrankaDroidEnv`) with dynamic
   7-DoF end-effector control matching the V-JEPA 2-AC action layout.
@@ -52,16 +52,22 @@ Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 25/25 tests passing):
 ## Repository layout
 
 ```
-assets/mujoco/scene.xml         Minimal tabletop MJCF (vial, holder, mocap EE, cameras)
-configs/mujoco_pilot.yaml        Step-1 scene / render / action / planner knobs
-src/envs/mujoco_scene.py         MujocoPilotEnv: render + 7-DoF EE + goal capture
-src/world_model/vjepa2_wrapper.py   V-JEPA 2-AC interface scaffold (no inference)
-src/utils/geometry.py            SO(3) helpers (extrinsic-XYZ Euler <-> quaternion)
-src/utils/config.py              Tiny YAML config loader
-scripts/setup_env.ps1            Reproducible venv + CUDA Torch + deps
-scripts/download_checkpoints.py  Download V-JEPA 2 weights (download only)
-tests/                           Geometry, env-kinematics, and render tests
-docs/                            DESIGN, architecture, related_work, research_log, ...
+assets/mujoco/scene.xml          Minimal tabletop MJCF (vial, holder, mocap EE, cameras)
+configs/mujoco_pilot.yaml         Scene / render / action / planner knobs
+src/envs/mujoco_scene.py          MujocoPilotEnv: mocap env (render + 7-DoF EE + goal capture)
+src/envs/franka_build.py          Compose Franka Panda + Robotiq 2F-85 (mjSpec)
+src/envs/franka_droid_env.py      FrankaDroidEnv: DROID-style 7-DoF EE control via differential IK
+src/utils/ik.py                   Differential IK (damped least squares)
+src/utils/geometry.py             SO(3) helpers (extrinsic-XYZ Euler <-> quaternion)
+src/utils/config.py               Tiny YAML config loader
+src/utils/logging.py              JEPA-style logging (CSV, GPU timers, meters)
+src/world_model/vjepa2_wrapper.py    V-JEPA 2-AC control-loop scaffold
+scripts/setup_env.ps1             Reproducible venv + CUDA Torch + deps
+scripts/download_checkpoints.py   Download V-JEPA 2 weights (download only, size-verified)
+scripts/vjepa2_ac_infer_test.py   Load V-JEPA 2-AC and time CEM planning (bf16, chunked)
+scripts/scripted_reach_test.py    Prescripted Franka reach baseline (5/5)
+tests/                            Geometry, env-kinematics, render, and utility tests
+docs/                             setup_stage, DESIGN, architecture, plan, related_work, ...
 ```
 
 ## Setup
