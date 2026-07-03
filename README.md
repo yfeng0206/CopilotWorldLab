@@ -40,7 +40,7 @@ RTX 3090. No closed-loop world-model control has been run yet; that is the first
 experiment. See [`docs/setup_stage.md`](docs/setup_stage.md) for the full record (setup
 milestones, the timing table, and the audit/cleanup log).
 
-Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 24/24 tests passing):
+Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 25/25 tests passing):
 
 - A DROID-style Franka Panda + Robotiq 2F-85 MuJoCo env (`FrankaDroidEnv`) with dynamic
   7-DoF end-effector control matching the V-JEPA 2-AC action layout.

@@ -129,3 +129,20 @@ def test_capture_goal_image_restores_state(env):
     after = env.get_ee_state().copy()
     assert img.shape == (64, 64, 3)
     np.testing.assert_allclose(before, after, atol=1e-6)
+
+
+def test_goal_image_reflects_gripper_state(env):
+    try:
+        env.render(camera="exo_cam")
+    except Exception as exc:  # noqa: BLE001
+        if any(h in str(exc).lower() for h in _GL_HINTS):
+            pytest.skip(f"No OpenGL context available: {exc}")
+        raise
+    pose = dict(pos=[0.5, 0.0, 0.3], euler=[np.pi, 0, 0], camera="exo_cam")
+    before = env.get_ee_state().copy()
+    open_img = env.capture_goal_image(gripper=0.0, **pose).astype(np.int16)
+    closed_img = env.capture_goal_image(gripper=1.0, **pose).astype(np.int16)
+    after = env.get_ee_state().copy()
+    # Settled fingers must change the rendered goal, else open/closed goals alias.
+    assert np.abs(open_img - closed_img).max() > 5
+    np.testing.assert_allclose(before, after, atol=1e-6)  # live state untouched

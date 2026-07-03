@@ -34,7 +34,7 @@ class MujocoPilotEnv:
         model_path: str,
         render_width: int = 256,
         render_height: int = 256,
-        default_camera: str = "wrist_cam",
+        default_camera: str = "scene_cam",
         ee_body: str = "ee",
         n_substeps: int = 5,
         gl_backend: Optional[str] = None,

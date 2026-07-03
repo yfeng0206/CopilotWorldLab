@@ -112,17 +112,22 @@ class VJEPA2ACWorldModel:
         )
 
 
-def load_vjepa2_ac(device: str = "cuda", source: str = "hub"):  # pragma: no cover
-    """Load the action-conditioned encoder + predictor (NOT called this session).
+def load_vjepa2_ac(device: str = "cuda", source: str = "local"):  # pragma: no cover
+    """Load the action-conditioned encoder + predictor (scaffold; see the working harness).
 
-    Kept for tomorrow's wiring. Imports torch lazily and would trigger a multi-GB
-    download on first use, so it is never invoked by tests or module import.
+    A working local-checkpoint loader and CEM timing harness already exist in
+    ``scripts/vjepa2_ac_infer_test.py``; this wrapper method is the control-loop entry point
+    still to be wired. Load the local checkpoint directly -- the vendored repo's torch.hub
+    base URL is a localhost stub -- and keep the encoder frozen.
     """
     import torch  # noqa: F401  (lazy; avoids importing torch on module load)
 
     raise NotImplementedError(
-        "Enable in a later session. Intended path:\n"
-        "  import torch\n"
-        "  enc, pred = torch.hub.load(*VJEPA2_AC_HUB)\n"
+        "Wire via the local checkpoint (see scripts/vjepa2_ac_infer_test.py):\n"
+        "  from src.hub.backbones import _make_vjepa2_ac_model, _clean_backbone_key\n"
+        "  enc, pred = _make_vjepa2_ac_model('vit_ac_giant', pretrained=False)\n"
+        "  state = torch.load(CHECKPOINT, map_location='cpu', weights_only=True)\n"
+        "  enc.load_state_dict(_clean_backbone_key(state['encoder']), strict=False)\n"
+        "  pred.load_state_dict(_clean_backbone_key(state['predictor']), strict=True)\n"
         "  return VJEPA2ACWorldModel(enc, pred, device)"
     )

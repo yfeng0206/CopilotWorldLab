@@ -43,6 +43,7 @@ CONTROL_SUBSTEPS = 125    # ~0.25 s at dt=0.002: one action == one paper control
 MAX_TRANSLATION = 0.13    # metres per action (paper constrains actions to ~13 cm)
 MAX_ROTATION = 0.5        # radians per action (keep orientation deltas bounded)
 IK_FAIL_TOL = 0.02        # metres: reject an action whose IK solution misses by > 2 cm
+GRIPPER_SETTLE_STEPS = 100  # physics steps to reach a commanded gripper opening in goal previews
 
 
 class FrankaDroidEnv:
@@ -175,6 +176,9 @@ class FrankaDroidEnv:
         action. The arm is driven by the position servos over ``control_substeps`` physics
         steps, so the result is physically consistent (contacts, gravity, grasp). Inspect
         ``last_action_ok`` / ``last_ik_pos_err`` to detect a rejected (unreachable) action.
+        ``last_action_ok`` reflects translation reachability only; read ``last_ik_rot_err``
+        for orientation error. The gripper command is applied independently of whether the
+        arm move was accepted.
         """
         delta = np.asarray(delta, dtype=np.float64).reshape(STATE_DIM)
         trans = delta[:3].copy()
@@ -220,15 +224,29 @@ class FrankaDroidEnv:
             renderer.close()
 
     def capture_goal_image(self, pos=None, euler=None, gripper=None,
-                           camera: Optional[str] = None) -> np.ndarray:
+                           camera: Optional[str] = None,
+                           settle_steps: int = GRIPPER_SETTLE_STEPS) -> np.ndarray:
+        """Render a hypothetical goal pose without disturbing the live state.
+
+        The arm is teleported kinematically, but the gripper is a driven linkage whose
+        finger pose is not set by ``mj_forward`` alone, so when a gripper opening is
+        requested the physics is stepped briefly (arm held by its servos) to let the fingers
+        reach the commanded opening -- otherwise open vs closed goals would render alike.
+        """
         saved_qpos = self.data.qpos.copy()
+        saved_qvel = self.data.qvel.copy()
         saved_ctrl = self.data.ctrl.copy()
         saved_grip = self._gripper_cmd
         try:
             self.set_ee_pose(pos=pos, euler=euler, gripper=gripper)
+            if gripper is not None and settle_steps:
+                self.data.qvel[:] = 0.0
+                for _ in range(int(settle_steps)):
+                    self._mujoco.mj_step(self.model, self.data)
             return self.render(camera=camera)
         finally:
             self.data.qpos[:] = saved_qpos
+            self.data.qvel[:] = saved_qvel
             self.data.ctrl[:] = saved_ctrl
             self._gripper_cmd = saved_grip
             self._mujoco.mj_forward(self.model, self.data)

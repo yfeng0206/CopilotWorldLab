@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_MENAGERIE = os.path.join("third_party", "mujoco_menagerie")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_MENAGERIE = os.path.join(_REPO_ROOT, "third_party", "mujoco_menagerie")
 
 # The arm's tool flange exposes site "attachment_site"; the Robotiq root body is
 # "base_mount". Gripper elements are prefixed "2f85_" in the composed model.

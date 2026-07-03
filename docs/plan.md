@@ -57,14 +57,16 @@ MPC (at ~16 s/action, large-N CEM trials are expensive on one 3090):
 - [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
 - [x] Franka + Robotiq 2F-85 composed (mjSpec), exocentric camera, EE-space control via
       differential IK (`FrankaDroidEnv`); scripted reach test passes 5/5.
-- [ ] `apply_action` dynamically stepped (IK -> ctrl -> mj_step) with a measured gripper
-      opening and action bounds (audit top fix; required before grasp / world-model wiring).
-- [ ] Encoder-only inference on a rendered frame.
-- [ ] CEM planning to a goal image; latency measurement.
+- [x] Franka + Robotiq 2F-85 composed (mjSpec), exocentric camera, EE-space control via
+      differential IK (`FrankaDroidEnv`); scripted reach test passes 5/5.
+- [x] `apply_action` dynamically stepped (IK -> ctrl -> mj_step) with a measured gripper
+      opening and action bounds (commit abeaad6; the substrate for grasp / world-model wiring).
+- [x] Encoder + AC predictor load from the local checkpoint; encoder-only + CEM inference
+      run in `scripts/vjepa2_ac_infer_test.py`.
+- [x] CEM latency measured (V-JEPA 2-AC, bf16 on the 3090: 800 samples = 32 s, chunked).
+- [ ] CEM planning to a rendered goal image, in the env loop (interface calibration first).
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
-- [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
-- [ ] Franka behind the same 7-D EE interface (differential-IK / mocap-weld pose->joint shim).
 
 ## Evaluation (the two primary measurements)
 

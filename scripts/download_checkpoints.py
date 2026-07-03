@@ -81,6 +81,8 @@ def download_stream(url: str, dest: str, chunk: int = 1 << 20) -> str:
                     sys.stdout.write(f"\r  {_human(done)}")
                 sys.stdout.flush()
     sys.stdout.write("\n")
+    if total and done != total:
+        raise IOError(f"incomplete download: got {done} of {total} bytes; kept {tmp} for resume")
     os.replace(tmp, dest)
     return dest
 

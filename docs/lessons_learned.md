@@ -135,3 +135,26 @@ not sneak back in.
   drop to 32 s (predictor-bound) at 15 GiB peak. Do NOT set
   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` on Windows; it is unsupported there and
   only prints a warning.
+
+---
+
+## Simulation and world-model interface
+
+### 16. `mj_forward` does not integrate actuators; step physics to preview a driven gripper
+- **What happens**: `capture_goal_image` set the Robotiq gripper command and called
+  `mj_forward`, but open- and closed-gripper goal images rendered identically.
+- **Why**: `mj_forward` computes kinematics/dynamics for the current state; it does not
+  advance actuators toward their targets. The 2F-85 fingers are a driven linkage, so their
+  qpos only moves when the physics is stepped.
+- **Rule**: to preview any position-actuated part (the gripper), briefly `mj_step` with the
+  command set (save and restore `qpos`/`qvel`/`ctrl`), do not rely on `mj_forward` after
+  writing `data.ctrl`. Covered by `test_goal_image_reflects_gripper_state`.
+
+### 17. The V-JEPA CEM action bound is a per-axis box, and our env clamps the L2 norm
+- **What happens**: docs called `maxnorm = 0.075` an "L1 ball". It is not.
+- **Why**: the reference CEM clips each translation axis independently to
+  `[-maxnorm, maxnorm]` (an axis-aligned box / L-inf ball, ~13 cm Euclidean diagonal) and
+  zeros rotation, whereas `FrankaDroidEnv` bounds the L2 norm of the translation to
+  `max_translation` (0.13 m) -- a different constraint shape.
+- **Rule**: describe the CEM bound as a box, not an L1 ball, and reconcile the box (CEM) vs.
+  L2 (env) translation limits during interface calibration before any zero-shot transfer.

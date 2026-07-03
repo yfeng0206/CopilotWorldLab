@@ -122,7 +122,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32")
+    parser.add_argument("--dtype", choices=["fp32", "bf16"], default="bf16")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--chunk", type=int, default=200,
                         help="predictor sub-batch size over CEM samples (0 = whole batch); "

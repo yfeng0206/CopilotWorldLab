@@ -13,6 +13,33 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-03 -- Second audit (code-auditor) + fixes
+
+#### 10. Cross-cutting code audit: triage and fixes, table unchanged
+**Context**: A second, broader audit (gpt-5.5 xhigh code-auditor, P0-P3) over the whole
+setup after the inference harness landed. Judge each finding real vs. nit, apply the real
+ones, and check whether anything needs re-running to update the committed timing table.
+**Triage / fixes** (real, applied): inference default was fp32 despite the documented bf16
+requirement (-> default bf16); `capture_goal_image` set the gripper command but `mj_forward`
+does not move the driven Robotiq fingers, so open/closed goals aliased (-> settle the
+gripper with a short physics rollout, state saved/restored, regression test added);
+`DEFAULT_MENAGERIE` was cwd-relative so `FrankaDroidEnv()` failed outside the repo root
+(-> anchor to repo root via `__file__`); the action bound was mis-documented as an "L1 ball"
+when the CEM clips each translation axis independently (a box / L-inf ball), and our env
+bounds the L2 norm instead (-> fixed the docs and flagged the box-vs-L2 mismatch for
+calibration); the checkpoint downloader had no integrity check (-> verify size ==
+Content-Length); stale docs (`architecture.md` "scaffold-only", `plan.md` TODOs) synced;
+`MujocoPilotEnv` camera default `wrist_cam` -> `scene_cam`.
+**Deferred (real, but the experiment stage, not defects)**: unified dynamic
+Franka+vial+holder scene, pinned vendored/HF revisions, broader test coverage, dependency
+pins.
+**Re-run**: full suite now 25 passed (adds the goal-preview gripper regression). Re-ran the
+inference harness with the bare (now bf16) command: identical timings (100/400/800 =
+4.4/16.4/32.7 s, peak 15.0 GiB) and identical planned action, so the committed table needs
+no value change -- only the audit/cleanup docs were updated.
+**References**: this session's code-auditor findings; `scripts/vjepa2_ac_infer_test.py`,
+`src/envs/franka_droid_env.py`, `src/envs/franka_build.py`, `scripts/download_checkpoints.py`.
+
 ### 2026-07-02 -- Stage-1 set-up: environment, repo restyle, MuJoCo scaffold
 
 #### 9. First V-JEPA 2-AC inference: logging, timing, and the 800-sample memory cliff

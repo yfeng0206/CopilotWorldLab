@@ -53,8 +53,11 @@ freeze-the-encoder design is what makes a single 24 GB GPU sufficient (Section 5
 
 7-D vector `[dx, dy, dz, d_roll, d_pitch, d_yaw, d_gripper]` (position, extrinsic-XYZ
 Euler, gripper). This matches `FrankaDroidEnv`'s action layout exactly. CEM samples xyz +
-gripper and zeros rotation by default; per-action translation constrained to an L1-ball of
-radius `maxnorm = 0.075` (~13 cm at 4 fps).
+gripper and zeros rotation by default; each translation axis is clipped independently to
+`[-maxnorm, maxnorm]` with `maxnorm = 0.075` -- an axis-aligned box (L-inf ball), not an
+L1 ball, so up to ~13 cm Euclidean displacement per action at 4 fps. Note: `FrankaDroidEnv`
+instead bounds the L2 norm of the translation to `max_translation` (0.13 m); reconcile the
+box-vs-L2 shapes during interface calibration before zero-shot transfer.
 
 ## 3. The Released Checkpoint
 

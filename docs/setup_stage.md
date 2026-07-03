@@ -18,7 +18,7 @@ Verified on Windows 11, RTX 3090 (24 GB), CUDA 12.4 wheel, Python 3.11. Committe
 | Repo restructure | Branch `world-model-pilot` mirroring I-JEPA_3D_OCT doc discipline; proposal generators kept local/gitignored | Done | PR #1 |
 | GitHub identity | `gh` auth and all commits as `yfeng0206` (not an org identity) | Done | commits `abeaad6`, `edcf011` |
 | Franka DROID env | Franka Panda + Robotiq 2F-85 composed via `mjSpec`; dynamic 7-DoF end-effector control (differential IK -> `ctrl` -> `mj_step`), measured gripper, TCP at `2f85_pinch` | Done | `src/envs/franka_build.py`, `src/envs/franka_droid_env.py`, `src/utils/ik.py` |
-| Test suite | Model, kinematics, and render tests; render tests skip (not fail) without a GL context | Done (24 passed) | `tests/`, `pytest.ini` |
+| Test suite | Model, kinematics, and render tests; render tests skip (not fail) without a GL context | Done (25 passed) | `tests/`, `pytest.ini` |
 | V-JEPA 2-AC checkpoint | Verified public/ungated; downloaded 11 GB; relocated to `D:` via a directory junction | Done | `checkpoints/` junction; lessons #6, #13 |
 | V-JEPA 2-AC loading | ViT-g encoder (1.01B) + AC predictor (305M) load from the local `.pt` with a fail-loud mismatch guard; namespace-isolated from the vendored `src` | Done | `scripts/vjepa2_ac_infer_test.py` |
 | Logging | JEPA-style logging (`get_logger`, `CSVLogger`, `AverageMeter`, `gpu_timer`, `grad_logger`) mirrored from I-JEPA_3D_OCT | Done | `src/utils/logging.py` |
@@ -68,6 +68,28 @@ Cleanup performed alongside the fixes:
   `CHANGELOG.md`, and `docs/vjepa2_ac_architecture.md`.
 - Verified log hygiene: `logs/`, `checkpoints/`, `third_party/`, and `CHANGELOG.md` are
   gitignored, so only source and docs are committed.
+
+### Second audit (code-auditor, gpt-5.5 xhigh)
+
+A broader cross-cutting audit (P0-P3). No P0, and no blocker to the setup stage. Triaged
+real vs. deferred; applied the real, low-risk fixes and re-validated (25 tests pass; the
+inference table is unchanged -- the bf16 numbers were already the reported ones).
+
+| Area | Finding | Fix |
+|---|---|---|
+| Inference default | The bare command ran fp32, contradicting the documented bf16 requirement | Default `--dtype bf16` |
+| Goal-image preview | `capture_goal_image` set the gripper command but `mj_forward` does not move the driven fingers, so open vs. closed goals rendered alike | Briefly settle the gripper with physics (live state saved/restored); regression test added |
+| Env portability | `DEFAULT_MENAGERIE` was a cwd-relative path, so `FrankaDroidEnv()` failed outside the repo root | Anchor the path to the repo root via `__file__` |
+| Doc accuracy | The action bound was documented as an "L1 ball" | It is a per-axis box (L-inf ball); also flagged that `FrankaDroidEnv` bounds the L2 norm, to reconcile at calibration |
+| Downloader integrity | The streamed checkpoint had no size check | Verify final size == `Content-Length`; keep the `.part` on truncation |
+| Doc drift | `docs/architecture.md` still said V-JEPA was scaffold-only; `docs/plan.md` marked done items as TODO | Updated both to match the working harness |
+| Camera default | `MujocoPilotEnv` defaulted to `wrist_cam` vs. the preferred `scene_cam` | Default `scene_cam` |
+
+Deferred to the experiment stage (real observations, not defects): a unified dynamic
+Franka + vial + holder scene for end-to-end grasp/insert (that is the first experiment
+env), pinned vendored-code / HuggingFace revisions, broader test coverage (energy, config,
+logging), and tighter dependency pins. Lower-priority nits (doc wording, older-scaffold
+action-bound enforcement) are noted in `docs/lessons_learned.md`.
 
 ## 4. What this stage does NOT include (the experiments)
 
