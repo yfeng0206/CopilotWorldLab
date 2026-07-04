@@ -51,9 +51,9 @@ established-style, not a toy, no hacking) we build our **own** small MuJoCo gras
 From `third_party/vjepa2/notebooks/utils/world_model_wrapper.py` (the `WorldModel` MPC defaults)
 and `.../mpc_utils.py::cem` — the exact procedure we reproduce:
 
-| param | released code | paper (real robot) | our runs |
+| param | released code (verified) | paper text | our runs |
 |---|---|---|---|
-| horizon `rollout` (T) | **2** | 2 | 2 (ablate T=1) |
+| horizon `rollout` (T) | **2** | horizon **1** reported (to reconcile) | ablate T=1 vs T=2 |
 | population `samples` | **400** | ~800 | staged 100 -> 200 -> 800 |
 | CEM iterations `cem_steps` | **10** | 10 | 10 |
 | `topk` | 10 | 10 | 10 |
@@ -61,6 +61,12 @@ and `.../mpc_utils.py::cem` — the exact procedure we reproduce:
 | momentum (mean/std) | 0.15 | - | 0.15 |
 | objective | mean-L1 in **layer-norm'd** latent space | L1 energy | same |
 | replan | receding horizon (re-encode, replan) | receding horizon | same |
+
+**Horizon caveat (honest):** the only value we have directly verified is the released inference
+wrapper default, `rollout=2`. A prior read of the paper suggested a planning **horizon of 1**; we
+did not re-verify the paper text this session (the ar5iv/arxiv HTML would not paginate to the
+planning section). So we do **not** claim "the paper uses T=2." We treat T as a config we set and
+**ablate T=1 vs T=2**, and will reconcile against the paper before any headline claim.
 
 CEM samples xyz + gripper (rotation zeroed); the world-model rollout predicts `rollout` steps and
 compares the **final** predicted latent to the goal latent; top-k update; the returned action
@@ -310,9 +316,24 @@ Done:
 - Own-env foundation **built + validated**: `src/envs/franka_build.py` adds a 4 cm graspable
   free-joint cube (`add_object`) + place-zone marker (`add_zone`); `FrankaDroidEnv` gains
   `add_object/add_zone`, cube placement/settle on `reset(cube_xy)`, and privileged truth
-  (`object_pose/position/speed/tilt`, `zone_center`, `gripper_holds_object`). Physics checked:
-  cube rests stably; a scripted descend->close->lift grasps and lifts it (dz +0.14 m, held).
-  34 tests pass; defaults keep the arm-only env unchanged.
+  (`object_pose/position/speed/tilt`, `zone_center`, `gripper_holds_object`). `object_speed`
+  uses `mj_objectVelocity` (validated == cvel[3:] on a known shove). Physics checked:
+  cube rests stably; a scripted descend->close->lift grasps and lifts it (dz +0.14 m, held;
+  contacts are `2f85_{left,right}_pad` <-> cube; tilt ~2 deg, speed ~0.005 m/s).
+- Hidden **success functions implemented** (`src/bench/success.py`: reach/touch/grasp_lift/place,
+  pure + unit-tested) with thresholds calibrated from scripted rollouts.
+- Tests: **40 pass** (added `tests/test_success.py` unit tests + `tests/test_bench_env.py`
+  scripted grasp-lift physics regression). Defaults keep the arm-only env unchanged.
+
+**Two distinct benchmarks (do not conflate):** (1) **DROID transition scoring** = *established
+real-data* world-model sanity (rank_frac; transition_scoring.md); (2) **our MuJoCo cube tasks** =
+*controlled closed-loop physics* task-success benchmark (this doc). The cube tasks are our own
+honest env (real physics + hidden success), not an established suite -- reported as such.
+
+Notes for the runner (from audit): `reset(cube_xy=None)` is deterministic by default; the
+benchmark **randomizes cube (and place-target) positions per trial** via `cube_xy`. Success
+thresholds (`SUCCESS_DEFAULTS`) are calibrated against scripted-expert distributions before any
+headline success-rate is reported.
 
 Robomimic raw-render (Stage 0, `render_robomimic_task.py`) stays as an established-data reference
 and image source, but the closed-loop success runs in our own env.
@@ -320,8 +341,9 @@ and image source, but the closed-loop success runs in our own env.
 Next:
 1. Scripted expert (grasp-lift **and** place) -> capture sub-goal images (reach/grasp/lift/place)
    -> task bundles + contact sheet + GIF for **user visual approval**.
-2. `src/bench/success.py` (Section 4) + `scripts/run_closed_loop_benchmark.py` wiring V-JEPA CEM
-   at the paper config -> staged runs (validate 3x5-8 -> 20 trials @100/@200 -> final @800).
+2. `scripts/run_closed_loop_benchmark.py` wiring V-JEPA CEM at the paper config, using the
+   implemented `src/bench/success.py` for hidden success -> staged runs (validate 3x5-8 ->
+   20 trials @100/@200 -> final @800). Reconcile the T=1/T=2 horizon against the paper.
 
 References: [benchmark_plan.md](benchmark_plan.md), [transition_scoring.md](transition_scoring.md),
 [cem_closed_loop.md](cem_closed_loop.md), [../lessons_learned.md](../lessons_learned.md) #11/#19.

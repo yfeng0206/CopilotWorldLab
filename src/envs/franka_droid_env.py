@@ -165,10 +165,13 @@ class FrankaDroidEnv:
         return self.object_pose()[:3]
 
     def object_speed(self) -> float:
-        """Cube linear speed (m/s); used to check the object has settled."""
+        """Cube linear speed (m/s, world frame) via mj_objectVelocity; used to check settling."""
         if self._cube_bid < 0:
             return float("nan")
-        return float(np.linalg.norm(self.data.cvel[self._cube_bid][3:]))
+        vel = np.zeros(6)
+        self._mujoco.mj_objectVelocity(
+            self.model, self.data, self._mujoco.mjtObj.mjOBJ_BODY, self._cube_bid, vel, 0)
+        return float(np.linalg.norm(vel[3:]))  # mj_objectVelocity returns [angular(3), linear(3)]
 
     def object_tilt(self) -> float:
         """Angle (rad) between the cube's up-axis and world +z (0 = upright)."""
