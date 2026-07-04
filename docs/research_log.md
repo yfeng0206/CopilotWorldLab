@@ -13,6 +13,35 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-04 -- Overnight: energy-landscape reproduction
+
+#### 12. Reproducing the V-JEPA 2-AC energy landscape (correctness gate)
+**Context**: Before any planning, verify the loaded model reproduces the paper's published
+behavior (arXiv:2506.09985 Fig. 9): the latent energy should be minimized *near* the
+ground-truth action, and reversing the trajectory should flip the minimum. This is the
+honest, reproducible analog of "run the paper's benchmark" -- the headline success rates are
+real-hardware and not reproducible in sim.
+**Method**: `scripts/energy_landscape_repro.py` mirrors
+`notebooks/energy_landscape_example.ipynb` headlessly on GPU (bf16): encode the two example
+frames, sweep an `nsamples^3` xyz action grid, roll each one step through the AC predictor,
+score `mean(|P(a) - z_goal|)`, and compare the energy minimum to `poses_to_diff(s0, s1)`.
+Uses the paper's own `make_transforms` (verified equal to our ImageNet `mean*255/std*255`).
+**Result**: correct reproduction. The example GT action xyz = (0.092, 0.031, 0.084) exceeds
+the paper's 0.075 per-action grid, so at grid 0.075 the minimum sits at the boundary (points
+at the GT but cannot reach it). Widening to grid 0.12 (9^3) makes the GT interior: the
+REVERSE minimum lands at (-0.090, -0.060, -0.090) vs GT (-0.092, -0.031, -0.084) --
+cos +0.98, err 0.030 m (one grid cell). FORWARD is correct on x/z but has a flat y-axis, so
+the hard argmin wanders in y (cos +0.65). Reverse flips the dominant-axis sign. This matches
+the paper's characterization: smooth, locally convex, minimum only *near* GT. Model load +
+preprocessing validated end-to-end. Figures in `outputs/energy_landscape_*.png`.
+**Audit** (rubber-duck gpt-5.5 xhigh): core science verified correct; all findings were in
+the verdict layer. Applied: explicit RESULT PASS/FAIL + non-zero exit; hard argmin as the
+primary estimate (soft-min was center-biased); top-k low-energy centroid; judge vs GT clipped
+into the grid with a `gt_outside_grid` flag; cosine + energy-margin (flatness) reported;
+reverse-flip check now on the hard argmin; narrowed the heatmap except. Re-run: RESULT PASS.
+**References**: arXiv:2506.09985 Sec 3 + Fig. 9; notebooks/energy_landscape_example.ipynb;
+notebooks/utils/mpc_utils.py (poses_to_diff); app/vjepa_droid/transforms.py.
+
 ### 2026-07-03 -- Second audit (code-auditor) + fixes
 
 #### 11. Re-audit follow-up: atomic action, remaining doc/wrapper fixes, coverage
