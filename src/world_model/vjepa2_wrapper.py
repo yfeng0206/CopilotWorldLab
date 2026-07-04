@@ -20,8 +20,10 @@ Verified facts (arXiv:2506.09985 and facebookresearch/vjepa2)
 - Planning: encode current frame -> ``z_k`` and goal image -> ``z_g`` with the
   video encoder, then Cross-Entropy-Method MPC minimising the latent energy
   ``E(a; z_k, s_k, z_g) = || P(a; s_k, z_k) - z_g ||_1`` over sampled action
-  sequences (paper uses 800 samples, 10 CEM iterations, horizon 1; receding
-  horizon re-planning). Reported latency ~16 s / action on an RTX 4090.
+  sequences (Meta's released code defaults: 400 samples, 10 CEM iterations, horizon 2;
+  the paper text reports a larger population ~800 and may state horizon 1 -- we ablate
+  T=1 vs T=2, see docs/architecture.md Section 7). Receding-horizon re-planning; reported
+  latency ~16 s / action on an RTX 4090.
 - The same predictive energy ``E`` is the candidate confidence / hand-off signal.
 """
 from __future__ import annotations
@@ -48,11 +50,16 @@ VJEPA2_ENCODERS = {
 
 @dataclass
 class PlannerConfig:
-    """Cross-Entropy-Method MPC settings (defaults follow the V-JEPA 2-AC paper)."""
+    """Cross-Entropy-Method MPC settings.
 
-    samples: int = 800
+    Defaults follow Meta's released inference code (`world_model_wrapper.py`): population 400,
+    10 iterations, horizon 2. The paper text quotes a larger population (~800) and may report
+    horizon 1; horizon is ablated (T=1 vs T=2) rather than assumed (docs/architecture.md Sec 7).
+    """
+
+    samples: int = 400
     iterations: int = 10
-    horizon: int = 1
+    horizon: int = 2
     top_k: int = 10
     action_low: Optional[np.ndarray] = None
     action_high: Optional[np.ndarray] = None

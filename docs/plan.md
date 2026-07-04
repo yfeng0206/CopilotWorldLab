@@ -9,9 +9,11 @@ measurement, before any physical hardware.
 - **Stage 1 (current).** Software pilot in simulation: the MuJoCo scene, world-model
   coarse placement (V-JEPA 2-AC, Option 1), and the confidence-gate measurement. Stage 1
   tests whether the gate signal is meaningful *in this simulator*; whether that confidence
-  transfers to real hardware remains for Stage 2. Because the end-effector is a kinematic
-  mocap body, Stage 1 validates the latent scoring / planning interface, not real
-  robot-arm dynamics.
+  transfers to real hardware remains for Stage 2. The env is `FrankaDroidEnv` -- a real
+  7-DoF Franka arm with differential IK, contacts and a Robotiq gripper (grasping is
+  physical), so Stage 1 exercises real arm dynamics, not a kinematic mocap toy. Embodiment
+  note: Franka in sim (matches V-JEPA's DROID training); the physical target is a UR7e
+  (Stage 2). See [`DESIGN.md`](DESIGN.md#embodiment-franka-in-sim-ur7e-on-hardware).
 - **Stage 2.** The same orchestrator on the physical UR7e for a single vial-placement
   task: real coarse-placement error, end-to-end seat success, and a setup-cost comparison
   against classical calibration on real holders.
@@ -50,9 +52,10 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 ## Stage-1 build checklist
 
 - [x] Reproducible local environment (venv + CUDA Torch + MuJoCo), verified on the 3090.
-- [x] Minimal MuJoCo scene and `MujocoPilotEnv` (render, 7-DoF EE, goal capture).
+- [x] MuJoCo Franka scene and `FrankaDroidEnv` (render, real 7-DoF EE, goal capture). The
+      earlier kinematic `MujocoPilotEnv` is archived (`archive/src/mujoco_scene.py`).
 - [x] V-JEPA 2-AC interface scaffold and download-only checkpoint fetch.
-- [x] Test suite (geometry, env kinematics, render) passing.
+- [x] Test suite (geometry, Franka env, grasp physics, success, utils) passing.
 - [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
 - [x] Franka + Robotiq 2F-85 composed (mjSpec), exocentric camera, EE-space control via
       differential IK (`FrankaDroidEnv`); scripted reach test passes 5/5.
@@ -61,7 +64,11 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 - [x] Encoder + AC predictor load from the local checkpoint; encoder-only + CEM inference
       run in `scripts/vjepa2_ac_infer_test.py`.
 - [x] CEM latency measured (V-JEPA 2-AC, bf16 on the 3090: 800 samples = 32 s, chunked).
-- [ ] CEM planning to a rendered goal image, in the env loop (interface calibration first).
+- [x] CEM planning to a rendered goal image, in the env loop (`scripts/cem_reach_loop.py`):
+      reach succeeds; multi-goal chaining works. Interface calibration (W*) still pending.
+- [x] Graspable-object env substrate: cube + place zone + hidden success functions
+      (`src/bench/success.py`), scripted grasp-lift regression passes.
+- [ ] Closed-loop task-success benchmark runner (Reach/Grasp-lift/Place) + staged runs.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 

@@ -1,6 +1,11 @@
-# Phase 1 — Closed-Loop CEM Planning to a Goal Image
+# Closed-Loop CEM Planning to a Goal Image (Phase-1 pilot)
 
 Date: 2026-07-04. Branch: world-model-pilot. GPU: RTX 3090 (bf16).
+
+> Phase note (roadmap in [`../DESIGN.md`](../DESIGN.md#0-project-roadmap-phases)): this is the
+> **closed-loop reach pilot** that precedes the full Phase-1 task-success benchmark
+> ([`closed_loop_success_plan.md`](closed_loop_success_plan.md)). It shows the CEM env loop works;
+> it is not the benchmarked success-rate result.
 
 ## Question
 
