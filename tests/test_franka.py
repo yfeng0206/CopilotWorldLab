@@ -158,3 +158,20 @@ def test_goal_image_reflects_gripper_state(env):
     # Settled fingers must change the rendered goal, else open/closed goals alias.
     assert np.abs(open_img - closed_img).max() > 5
     np.testing.assert_allclose(before, after, atol=1e-6)  # live state untouched
+
+
+def test_default_render_uses_planning_camera(env):
+    import mujoco
+
+    # The env must default to the validated best zero-shot view, not the built-in exo_cam.
+    assert env.default_camera == "planning"
+    assert env._resolve_camera(None).type == mujoco.mjtCamera.mjCAMERA_FREE
+    try:
+        default_img = env.render()
+        exo_img = env.render(camera="exo_cam")
+    except Exception as exc:  # noqa: BLE001
+        if any(h in str(exc).lower() for h in _GL_HINTS):
+            pytest.skip(f"No OpenGL context available: {exc}")
+        raise
+    # Different viewpoints must produce different observations.
+    assert not np.array_equal(default_img, exo_img)

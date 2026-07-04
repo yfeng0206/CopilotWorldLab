@@ -31,7 +31,9 @@ from src.envs.franka_build import (
     GRIPPER_ACTUATOR,
     GRIPPER_DRIVER_JOINT,
     GRIPPER_DRIVER_RANGE,
+    PLANNING_CAMERA,
     build_franka_robotiq,
+    make_free_camera,
 )
 from src.utils import geometry as geo
 from src.utils import ik as ik_solver
@@ -53,7 +55,7 @@ class FrankaDroidEnv:
         menagerie_dir: Optional[str] = None,
         render_width: int = 256,
         render_height: int = 256,
-        default_camera: str = "exo_cam",
+        default_camera: str = "planning",
         ik_iters: int = 100,
         control_substeps: int = CONTROL_SUBSTEPS,
         max_translation: float = MAX_TRANSLATION,
@@ -75,6 +77,9 @@ class FrankaDroidEnv:
         self.render_width = int(render_width)
         self.render_height = int(render_height)
         self.default_camera = default_camera
+        # Validated best zero-shot view (camera ablation). The env renders observations from
+        # this free camera by default; pass camera="exo_cam" or another name to override.
+        self._planning_camera = make_free_camera(**PLANNING_CAMERA)
         self.ik_iters = int(ik_iters)
         self.control_substeps = int(control_substeps)
         self.max_translation = float(max_translation)
@@ -213,9 +218,14 @@ class FrankaDroidEnv:
             )
         return self._renderer
 
+    def _resolve_camera(self, camera):
+        """Map the "planning" sentinel to the validated free planning camera; pass names through."""
+        cam = camera or self.default_camera
+        return self._planning_camera if cam == "planning" else cam
+
     def render(self, camera: Optional[str] = None, width: Optional[int] = None,
                height: Optional[int] = None) -> np.ndarray:
-        cam = camera or self.default_camera
+        cam = self._resolve_camera(camera)
         w = int(width or self.render_width)
         h = int(height or self.render_height)
         if w == self.render_width and h == self.render_height:
