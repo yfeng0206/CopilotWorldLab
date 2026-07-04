@@ -200,6 +200,18 @@ class FrankaDroidEnv:
                 return True
         return False
 
+    def gripper_is_open(self, open_thresh: float = 0.15) -> bool:
+        """True if the measured gripper opening is below ``open_thresh`` (0 = fully open)."""
+        return self._measured_gripper() < open_thresh
+
+    def object_released(self, open_thresh: float = 0.15) -> bool:
+        """True if the gripper is open AND not touching the object (object resting free).
+
+        This is the ``released`` input to ``src.bench.success.place_success`` -- a place is only
+        valid once the arm has let go and the object stands on its own.
+        """
+        return self.gripper_is_open(open_thresh) and not self.gripper_holds_object()
+
     def _is_gripper_body(self, bid: int) -> bool:
         name = self._mujoco.mj_id2name(self.model, self._mujoco.mjtObj.mjOBJ_BODY, int(bid)) or ""
         return "2f85_" in name and ("pad" in name or "finger" in name or "follower" in name)

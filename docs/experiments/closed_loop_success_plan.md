@@ -25,9 +25,9 @@ runtime), so robomimic is the primary source.
 
 | Stage | Goal | Primary scripts |
 |---|---|---|
-| **0. Data / scene** | Reliable start/goal images, states, actions, hidden success labels; **visual approval before any benchmarking** | `scripts/render_robomimic_task.py`, `src/bench/schema.py`, `src/envs/robomimic_render.py`; fallback `scripts/build_mujoco_tasks.py` |
+| **0. Data / scene** | Reliable start/goal images, states, actions, hidden success labels; **visual approval before any benchmarking** | `scripts/build_own_tasks.py` (scripted expert in our env) + `src/bench/schema.py`. Robomimic render (`render_robomimic_task.py`) is a **reference/image source only**, not the closed-loop benchmark. |
 | **1. Success checks** | Exact hidden success functions (Reach/Touch/Grasp-Lift/Place) on privileged state | `src/bench/success.py` + `tests/test_success.py` |
-| **2. Vanilla benchmark** | Run CEM closed loop, no fine-tuning; N trials/task/difficulty; log everything | `scripts/run_closed_loop_benchmark.py` (+ steppable `src/envs/robomimic_scene.py`), reuses `scripts/cem_reach_loop.py` |
+| **2. Vanilla benchmark** | Run CEM closed loop, no fine-tuning; N trials/task/difficulty; log everything | `scripts/run_closed_loop_benchmark.py` on our own `FrankaDroidEnv` (add_object/add_zone); reuses the `scripts/cem_reach_loop.py` CEM |
 | **3. Diagnose failures** | Classify every failure (frame error, missed grasp, pushed, slipped, tipped, outside zone, energy/physics mismatch) | `scripts/diagnose_failures.py` |
 | **4. Improvements** | W* frame calibration, predictor fine-tune (frozen encoder), energy-gate calibration | `scripts/fit_wstar.py`, `scripts/finetune_predictor.py`, `scripts/energy_gate_roc.py` |
 | **5. Final comparison** | Report Vanilla vs +W* vs +Fine-tune table + figures | `scripts/make_benchmark_report.py` |
@@ -218,10 +218,18 @@ velocity, obj_dz) so ROC/gate analysis (Stage 4) is possible.
 
 ---
 
-## 5. robomimic tasks first + safe Windows rendering
+## 5. robomimic as a REFERENCE / image source (NOT the closed-loop benchmark)
 
-**Order:** Lift (grasp-lift, cube) → Can (pick-and-place → `place`) → Square (peg/placement →
-tight `place`). Transport later. Start with **Lift**.
+**Clarification (do not conflate):** the closed-loop task-success benchmark runs on **our own
+honest MuJoCo env** (Section on the crux above), because robosuite's runtime is blocked and we
+want full control of physics + hidden success. robomimic here is only: (a) an **established
+real-demo image/pose reference** to sanity-check our scene/camera against real Lift/Can/Square,
+and (b) available via Windows-safe raw-state rendering. It does **not** provide the closed-loop
+success numbers. The DROID transition benchmark (transition_scoring.md) is the established
+real-data sanity; the cube tasks are the controlled-physics closed-loop benchmark.
+
+**Robomimic reference order (rendering only):** Lift (grasp-lift, cube) → Can (pick-and-place) →
+Square (peg/placement). Start with **Lift**.
 
 **Datasets (already downloaded):** `data/robomimic/v1.5/<task>/ph/demo_v15.hdf5`. Each
 `data/demo_i` has `states` [T,32] (flattened `[time, qpos, qvel]`), `actions` [T,7] (OSC deltas),
