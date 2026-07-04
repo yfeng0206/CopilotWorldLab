@@ -50,17 +50,20 @@ Goals: reach +x, then reach +y from there (a 2-sub-goal chain).
 
 ![Chain: sub-goal 1 reached, sub-goal 2 plateaus and drifts](../../results/cem_loop/cem_loop_chain.png)
 
-- **Sub-goal 1** (+x) reached in 3 steps (dist 0.100 -> 0.020), and the controller **advanced**
+- **Sub-goal 1** (+x) reached in 3 steps (dist 0.100 -> 0.024), and the controller **advanced**
   to sub-goal 2 — the goal-image sequencing works.
 - **Sub-goal 2** (+y, lateral) dipped to ~0.032 m (just above the 0.03 m tolerance) at steps
-  5-6, then **drifted** back out to 0.068 m. It never crossed the tolerance.
+  1-4, then **drifted** back out to ~0.072 m. It never crossed the tolerance.
 
-This is an honest **precision limit of the vanilla model (~3-4 cm, worse on the lateral axis)**,
-not a loop bug: the camera ablation measured a ~8 deg residual rotation between the world frame
-and the model's inferred action frame at this camera, and the horizontal-plane energy landscape
-is shallow. Near the goal, small CEM corrections point slightly wrong and accumulate, so the
-arm hovers at 3-4 cm rather than settling. The first sub-goal happens to align well; the lateral
-sub-goal exposes the residual.
+**The drift is a model/interface limit, not a controller confound.** With the realized EE delta
+now logged (audit fix), the commanded-vs-realized tracking error is **mean 9 mm, max 12 mm, and
+constant across the episode** — roughly 5x smaller than the ~35-72 mm drift and not growing near
+the goal. The gripper is frozen and goal/context latents share the bf16 path, so those confounds
+are removed too. What remains: near the lateral goal the model keeps commanding a small spurious
+`+z` (realized ~0) and small lateral corrections that do not reduce the true pose distance — the
+energy landmark for this goal sits ~3 cm from the true pose and the horizontal landscape is
+shallow, so the arm hovers at the model's optimum (~3 cm) and then drifts. This matches the
+~8 deg view-relative residual measured in the camera ablation.
 
 ## Interpretation
 
@@ -79,10 +82,14 @@ sub-goal exposes the residual.
 
 - Reach success is on a single canonical goal from the home pose (n=1 per task); this validates
   the loop, it is not a success-rate benchmark (that is ManiSkill, Phase 3).
+- The 3 cm tolerance sits right at the vanilla precision floor: sub-goal 1 landed at 2.4 cm
+  (reached), sub-goal 2 at 3.2 cm (just over). A slightly looser tolerance would flip sub-goal 2
+  to "reached", so the headline is the ~3 cm precision floor, not a hard 1/2.
 - The goal here is a reach pose, not a grasped/stacked object — the pick/stack chaining is
   demonstrated with reach waypoints because the graspable-object scene is deferred
   (see [benchmark_plan.md](benchmark_plan.md)); the sub-goal machinery is ready for real goals.
-- No `W*` correction is applied yet; the ~8 deg residual is a known contributor to the drift.
+- No `W*` correction is applied yet; the ~8 deg residual is a measured contributor to the drift.
+- Controller confound ruled out by the logged tracking error (mean 9 mm), not assumed.
 
 ## Reproducibility
 
