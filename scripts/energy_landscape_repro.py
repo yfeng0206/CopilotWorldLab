@@ -280,26 +280,39 @@ def main() -> None:
     # reverse sanity pass) by default; otherwise every provided transition .npz, single
     # direction, with one model load shared across them.
     if args.traj:
+        import glob
+
+        paths = []
+        for pattern in args.traj:
+            paths.extend(sorted(glob.glob(pattern)))
+        if not paths:
+            logger.error("no trajectories matched: %s", args.traj)
+            raise SystemExit(1)
         items = []
-        for path in args.traj:
-            data = np.load(path)
+        for path in paths:
+            data = np.load(path, allow_pickle=False)
             tag = os.path.splitext(os.path.basename(path))[0]
-            items.append((tag, data["observations"], data["states"]))
+            # Optional embedded metadata lets us aggregate per camera rather than per file.
+            camera = str(data["camera"]) if "camera" in data.files else None
+            action = str(data["action"]) if "action" in data.files else None
+            items.append((tag, data["observations"], data["states"], camera, action))
         paper_mode = False
     else:
         traj = np.load(EXAMPLE_TRAJ)
         dirs = [("reverse", True)] if args.reverse else [("forward", False), ("reverse", True)]
         items = [(tag, traj["observations"][:, ::-1].copy() if rev else traj["observations"],
-                  traj["states"][:, ::-1].copy() if rev else traj["states"]) for tag, rev in dirs]
+                  traj["states"][:, ::-1].copy() if rev else traj["states"], None, None)
+                 for tag, rev in dirs]
         paper_mode = not args.reverse
 
     results = []
-    for tag, obs, st in items:
+    for tag, obs, st, camera, action in items:
         clips = transform(obs[0]).unsqueeze(0).to(device)
         states = torch.tensor(np.asarray(st))
         logger.info("[%s] clips=%s states=%s", tag, tuple(clips.shape), tuple(states.shape))
         r = run_once(encoder, predictor, tokens_per_frame, clips, states, poses_to_diff,
                      device, autocast_dtype, args.nsamples, args.grid_size, args.chunk, tag, stamp)
+        r["camera"], r["action"] = camera, action
         results.append(r)
         csv.log(tag, *np.round(r["gt"][:3], 4), *np.round(r["a_min"], 4),
                 *np.round(r["a_topk"], 4), round(r["err_hard"], 4), round(r["err_raw"], 4),
@@ -333,14 +346,48 @@ def main() -> None:
         logger.info("RESULT: energy-landscape reproduction %s", "PASS" if passed else "FAIL")
         failed = not passed
     elif not paper_mode:
-        # Camera/interface ablation: rank by GT alignment; flag which configs transfer.
-        ranked = sorted(results, key=lambda r: (-r["cos_gt"], r["err_hard"]))
-        logger.info("ranking (best GT alignment first):")
-        for r in ranked:
-            ok = r["cos_gt"] >= COS_OK and r["margin"] >= MARGIN_OK and not r["gt_outside_grid"]
-            logger.info("  %-24s cos=%+.2f err=%.3f m margin=%.2f boundary=%s -> %s",
-                        r["tag"], r["cos_gt"], r["err_hard"], r["margin"], r["at_boundary"],
-                        "transfers" if ok else "weak/inconclusive")
+        # Camera/interface ablation. Aggregate per camera (mean cosine, mean margin) when
+        # camera metadata is present; fall back to a per-transition ranking otherwise. A
+        # boundary/outside-grid transition is a setup issue, not model weakness -- exclude it
+        # from the alignment statistic but count it.
+        outside = sum(int(r["gt_outside_grid"]) for r in results)
+        if outside:
+            logger.warning("%d/%d transitions had GT outside the grid (widen --grid-size)",
+                           outside, len(results))
+
+        cams = sorted({r["camera"] for r in results if r["camera"]})
+        if cams:
+            logger.info("per-camera ranking (best mean GT alignment first; n = usable axes):")
+            rows = []
+            for cam in cams:
+                rs = [r for r in results if r["camera"] == cam and not r["gt_outside_grid"]]
+                if not rs:
+                    continue
+                cos = np.array([r["cos_gt"] for r in rs])
+                rows.append((cam, float(cos.mean()), float(np.median(cos)), float(cos.min()),
+                             float(np.mean([r["margin"] for r in rs])), len(rs)))
+            for cam, mean_c, med_c, min_c, mean_m, n in sorted(rows, key=lambda x: -x[1]):
+                ok = mean_c >= COS_OK and mean_m >= MARGIN_OK
+                logger.info("  %-12s mean_cos=%+.2f median=%+.2f min=%+.2f margin=%.2f n=%d -> %s",
+                            cam, mean_c, med_c, min_c, mean_m, n,
+                            "transfers" if ok else "weak/inconclusive")
+
+            # Per action-axis summary (which motions the model localizes across cameras).
+            acts = sorted({r["action"] for r in results if r["action"]})
+            if acts:
+                logger.info("per-axis mean cosine (across cameras):")
+                for a in acts:
+                    ca = [r["cos_gt"] for r in results if r["action"] == a and not r["gt_outside_grid"]]
+                    if ca:
+                        logger.info("  %-4s mean_cos=%+.2f (n=%d)", a, float(np.mean(ca)), len(ca))
+        else:
+            ranked = sorted(results, key=lambda r: (-r["cos_gt"], r["err_hard"]))
+            logger.info("per-transition ranking (best GT alignment first):")
+            for r in ranked:
+                ok = r["cos_gt"] >= COS_OK and r["margin"] >= MARGIN_OK and not r["gt_outside_grid"]
+                logger.info("  %-24s cos=%+.2f err=%.3f m margin=%.2f -> %s",
+                            r["tag"], r["cos_gt"], r["err_hard"], r["margin"],
+                            "transfers" if ok else "weak/inconclusive")
 
     logger.info("done")
     if failed:

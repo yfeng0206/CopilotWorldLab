@@ -13,6 +13,37 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-04 -- Overnight: camera-placement ablation + view-relative frame
+
+#### 13. MuJoCo transfer, camera ablation, and the view-relative horizontal frame
+**Context**: With the energy landscape reproduced (#12), test whether the DROID-trained
+model transfers to our MuJoCo renders and which camera transfers best -- the user's question
+"is the camera wrong? do a camera-placement ablation."
+**Method**: `scripts/render_franka_transitions.py` drives `FrankaDroidEnv` one real control
+step for six EE deltas (+/-x,y,z) x three start poses, rendering each transition from eight
+cameras (seven free placements + the exact built-in `exo_cam`). `energy_landscape_repro.py
+--traj` scores all 144 (one model load) and aggregates per camera.
+**Result**: transfer works qualitatively (all side cameras have healthy energy margins). Per
+camera mean cosine (argmin vs GT): az45_el45 +0.92, az45_el20 +0.89, az90_el45 +0.57,
+az90_el20 +0.50, top_down +0.19, az135_el45 +0.12, az135_el20 +0.08, exo_named -0.16. Vertical
+z transfers everywhere (pz +0.82, nz +0.72); horizontal x/y is weak.
+**Confound resolved (key result)**: `scripts/analyze_frame_rotation.py` fits one in-plane
+rotation per camera mapping GT->argmin. The fitted angle tracks the camera azimuth almost
+linearly (-45->~13, -90->~55, -135->~107 deg) and every side camera recovers to cos 0.84-0.95
+after it. So the model infers horizontal actions in a VIEW-RELATIVE frame: az135 / the built-in
+exo_cam are not unusable, they need a large W* rotation (paper App. B.4). For zero-shot,
+az45_el45 is best (~8 deg residual). top_down stays at cos 0.65 even after rotation -- a genuine
+depth-observability failure, confirming exocentric-only training.
+**Audit** (rubber-duck gpt-5.5 xhigh): rendering + GT verified correct. Applied design fixes:
+per-camera aggregation (was per-transition), `--step` (0.06, inside the grid), the exact
+`exo_named` reference, three start poses, +/-y actions; the frame confound the audit flagged
+is resolved by the rotation analysis above.
+**Outcome**: choose an az45_el45-style planning camera; fit/freeze W* next; then close the
+loop with CEM planning to a rendered goal image. Writeup:
+`docs/experiments/energy_landscape_and_camera_ablation.md`.
+**References**: arXiv:2506.09985 App. B.2/B.4; notebooks/utils/mpc_utils.py (poses_to_diff);
+FrankaDroidEnv; the three overnight scripts.
+
 ### 2026-07-04 -- Overnight: energy-landscape reproduction
 
 #### 12. Reproducing the V-JEPA 2-AC energy landscape (correctness gate)
