@@ -20,27 +20,26 @@ measurement, before any physical hardware.
 
 ## Immediate next steps (next session)
 
-Done so far: the encoder + AC predictor load from the local checkpoint; CEM latency measured
-(`vjepa2_ac_infer_test.py`, bf16 ~32 s at 800 samples). Interface calibration is largely done
-via the **camera-placement ablation** (`docs/experiments/energy_landscape_and_camera_ablation.md`):
-the horizontal action frame is view-relative, the best zero-shot view is `PLANNING_CAMERA`
-(az45_el45, now the `FrankaDroidEnv` default), and the first established benchmark
-(transition scoring) has a vanilla baseline. The plan is now benchmark-driven
+Done so far: encoder + AC predictor load; CEM latency measured (~32 s at 800 samples);
+interface calibration via the **camera ablation** (view-relative frame; `PLANNING_CAMERA` =
+az45_el45 is the `FrankaDroidEnv` default); **benchmark 1** (transition scoring) vanilla baseline
+(rank 1.00 vs null 0.30, AUROC 0.953 DROID); and **Phase 1 closed-loop CEM** to a goal image
+(`docs/experiments/cem_closed_loop.md`) -- reach succeeds (goal image in 3 steps), multi-goal
+chaining works, and the ~3 cm precision floor is diagnosed as a model/interface limit (tracking
+error only 9 mm), motivating W* + fine-tuning. The plan is benchmark-driven
 (`docs/experiments/benchmark_plan.md`). Remaining:
 
-1. **Freeze the interface.** `PLANNING_CAMERA` is wired as the env default; optionally fit and
-   freeze the App. B.4 `W*` horizontal rotation so lower-azimuth cameras are also usable. The
-   ablation showed the planning camera needs only ~8 deg, so this is a refinement, not a blocker.
-2. **Stand up ManiSkill (benchmark 2).** Zero-shot success on PickCube / StackCube /
-   PegInsertionSide via a thin adapter (render -> V-JEPA latent -> CEM -> step -> official
-   success), in a separate venv (SAPIEN vs our mujoco 3.10). Record the vanilla baseline.
-3. **CEM reach to a goal image, in the env loop.** Wire `plan_action` into `FrankaDroidEnv`
-   using `PLANNING_CAMERA`; validate the latent energy decreases toward a captured goal image.
+1. **W* calibration + re-run Phase 1.** Fit/freeze the App. B.4 horizontal rotation for the
+   planning camera and re-run the CEM chain; expect the lateral sub-goal to converge -- the first
+   improvement delta on our own closed-loop benchmark.
+2. **ManiSkill (benchmark 2).** Separate venv (SAPIEN); adapter render -> V-JEPA latent -> the
+   Phase-1 CEM loop -> step -> official success on PickCube / StackCube / PegInsertionSide.
+3. **Harden benchmark 1 on a DROID batch.** Score many real DROID trajectories for a statistical
+   rank_frac/AUROC (needs the DROID dataset in the npz format).
 4. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
-   task data, then re-run benchmarks 1 and 2 and report improvement as metric deltas
-   (rank_frac/AUROC, success rate, CEM efficiency, energy calibration).
-5. **Confidence-gate data.** Perturb the start pose, plan, and log terminal energy + the
-   confound baselines + the success label (the project's central gate measurement).
+   task data; re-run benchmarks 1-2 + Phase 1 and report improvement as metric deltas.
+5. **Confidence-gate data.** Perturb the start pose, plan, log terminal energy + confound
+   baselines + success label (the project's central gate measurement).
 
 ## Stage-1 build checklist
 
