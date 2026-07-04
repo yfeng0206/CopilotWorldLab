@@ -11,8 +11,9 @@ the TRUE action against K random negative actions of the same magnitude, and rep
                test; on the DROID example the true rotation is tiny and gripper unchanged.
 - top1_acc   : fraction of transitions where the true action beats ALL its negatives
 - gap_z      : (mean negative energy - true energy) / std, an effect size
-- null rank  : the SAME test scored against a MISMATCHED goal (shuffled across transitions).
-               If the model is image-goal-conditioned, rank_frac >> null_rank ~ 0.5.
+- null rank : the SAME test scored against a MISMATCHED goal from a DIFFERENT group (a random
+               other DROID episode / camera). If the model is image-goal-conditioned,
+               rank_frac >> null_rank ~ 0.5.
 - auroc_pool : pooled true(1)-vs-negative(0) separability by -energy. Labelled "pooled" because
                it mixes energies across transitions (partly a global-calibration signal), so
                rank_frac is the cleaner within-transition number.
@@ -139,6 +140,27 @@ def rank_stats(energy):
             float((e_neg.mean() - e_true) / (e_neg.std() + 1e-8)), float(e_true), e_neg)
 
 
+def build_null_indices(groups, rng):
+    """For each transition pick a random OTHER transition from a different group (episode/camera).
+
+    The null (image-conditioning) control must pair each context with a goal from a genuinely
+    different scene. Drawing the neighbour (i+1) is a weak mismatch when adjacent transitions
+    come from the same episode, which inflates the null; a random different-group goal fixes it.
+    Falls back to any other transition when only one group exists.
+    """
+    n = len(groups)
+    if n < 2:
+        return [0]
+    idx = np.arange(n)
+    null = np.zeros(n, dtype=int)
+    for i in range(n):
+        cand = idx[(idx != i) & (np.asarray(groups) != groups[i])]
+        if cand.size == 0:
+            cand = idx[idx != i]
+        null[i] = int(rng.choice(cand))
+    return null.tolist()
+
+
 def main() -> None:
     import torch
 
@@ -231,6 +253,7 @@ def main() -> None:
             z = encode_frames(encoder, clips, tokens_per_frame)
         trans.append({
             "tag": tag, "camera": camera,
+            "group": tag.rsplit("_f", 1)[0] if "_f" in tag else camera,
             "z_ctx": z[:, :tokens_per_frame], "z_goal": z[:, -tokens_per_frame:],
             "s_ctx": states[:, :1].to(z.device),
             "actions": torch.as_tensor(cand, device=z.device, dtype=z.dtype).unsqueeze(1),
@@ -241,14 +264,21 @@ def main() -> None:
         logger.error("no usable transitions")
         raise SystemExit(1)
 
-    # Pass 2: score each transition against its OWN goal and against a MISMATCHED (shuffled) goal.
+    # Null (image-conditioning) control: score each transition against a MISMATCHED goal drawn
+    # from a DIFFERENT group (different DROID episode / different camera) so the null is a true
+    # scene mismatch, not an adjacent, correlated frame. If the model is image-goal-conditioned,
+    # real rank_frac >> null_rank ~ 0.5.
+    groups = [t["group"] for t in trans]
+    null_idx = build_null_indices(groups, rng)
+
+    # Pass 2: score each transition against its OWN goal and against the mismatched-goal null.
     results, pos_pool, neg_pool = [], [], []
     for i, t in enumerate(trans):
         with torch.no_grad(), torch.autocast(dev.type, dtype=autocast_dtype,
                                              enabled=autocast_dtype is not None):
             e_real = score_actions(predictor, t["z_ctx"], t["s_ctx"], t["z_goal"],
                                    t["actions"], tokens_per_frame, args.chunk).cpu().numpy()
-            null_goal = trans[(i + 1) % n]["z_goal"] if n > 1 else t["z_goal"]
+            null_goal = trans[null_idx[i]]["z_goal"]
             e_null = score_actions(predictor, t["z_ctx"], t["s_ctx"], null_goal,
                                    t["actions"], tokens_per_frame, args.chunk).cpu().numpy()
         rf, top1, gap, e_true, e_neg = rank_stats(e_real)
