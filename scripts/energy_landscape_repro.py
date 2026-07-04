@@ -228,7 +228,8 @@ def main() -> None:
     parser.add_argument("--dtype", choices=["fp32", "bf16"], default="bf16")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--nsamples", type=int, default=7, help="grid points per axis (S = n^3)")
-    parser.add_argument("--grid-size", type=float, default=0.075, help="half-extent per axis (m)")
+    parser.add_argument("--grid-size", type=float, default=0.12, help="half-extent per axis (m); "
+                        "0.12 contains the DROID example GT so the paper-mode pass is not boundary-clipped")
     parser.add_argument("--chunk", type=int, default=200, help="predictor sub-batch over grid")
     parser.add_argument("--reverse", action="store_true", help="only play the trajectory backwards")
     parser.add_argument("--traj", nargs="+", default=None,

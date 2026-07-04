@@ -6,7 +6,9 @@ goal frame, executed action) we score the latent energy E(a) = mean(|P(a; z, s) 
 the TRUE action against K random negative actions of the same magnitude, and report:
 
 - rank_frac  : within-transition fraction of negatives with higher energy than the true action
-               (this is the primary metric; chance 0.5, 1.0 = true beats all its own negatives)
+               (this is the primary metric; chance 0.5, 1.0 = true beats all its own negatives).
+               Actions are xyz-translation only (rotation + gripper zeroed) for a fair direction
+               test; on the DROID example the true rotation is tiny and gripper unchanged.
 - top1_acc   : fraction of transitions where the true action beats ALL its negatives
 - gap_z      : (mean negative energy - true energy) / std, an effect size
 - null rank  : the SAME test scored against a MISMATCHED goal (shuffled across transitions).
@@ -218,6 +220,9 @@ def main() -> None:
         if float(np.linalg.norm(true_xyz)) < MIN_MOTION:
             logger.warning("skip %s: near-zero true motion (%.4f m)", tag, float(np.linalg.norm(true_xyz)))
             continue
+        # Candidate actions are xyz-translation only (rotation + gripper zeroed) for both the
+        # true action and negatives -- a fair xyz-direction ranking test. The DROID example's
+        # true rotation is tiny and gripper unchanged, so dropping them is faithful there.
         cand = np.zeros((1 + args.negatives, 7), dtype=np.float32)
         cand[0, :3] = true_xyz
         cand[1:, :3] = random_negative_directions(true_xyz, args.negatives, rng)

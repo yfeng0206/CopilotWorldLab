@@ -253,6 +253,7 @@ class FrankaDroidEnv:
         saved_qvel = self.data.qvel.copy()
         saved_ctrl = self.data.ctrl.copy()
         saved_grip = self._gripper_cmd
+        saved_time = self.data.time
         try:
             self.set_ee_pose(pos=pos, euler=euler, gripper=gripper)
             if gripper is not None and settle_steps:
@@ -265,6 +266,7 @@ class FrankaDroidEnv:
             self.data.qvel[:] = saved_qvel
             self.data.ctrl[:] = saved_ctrl
             self._gripper_cmd = saved_grip
+            self.data.time = saved_time  # a preview must not advance the sim clock
             self._mujoco.mj_forward(self.model, self.data)
 
     def get_observation(self, camera: Optional[str] = None) -> dict:
