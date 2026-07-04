@@ -32,6 +32,17 @@ GRIPPER_DRIVER_JOINT = "2f85_right_driver_joint"  # measured opening, qpos in [0
 GRIPPER_DRIVER_RANGE = 0.8
 ARM_HOME_QPOS = [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853]
 
+# Graspable object + place target for the closed-loop benchmark (docs/experiments/
+# closed_loop_success_plan.md). A 4 cm cube is well within the Robotiq 2F-85's ~85 mm stroke.
+CUBE_BODY = "cube"
+CUBE_GEOM = "cube_geom"
+CUBE_HALF = 0.02            # 4 cm cube
+CUBE_START = (0.5, -0.10, 0.24)   # on the table top (z = 0.22 + half)
+PLACE_ZONE_BODY = "place_zone"
+PLACE_ZONE_CENTER = (0.5, 0.15, 0.221)
+PLACE_ZONE_RADIUS = 0.05
+TABLE_TOP_Z = 0.22
+
 # Best zero-shot planning camera from the camera-placement ablation
 # (docs/experiments/energy_landscape_and_camera_ablation.md): an opposite-shoulder, high
 # exocentric free camera that needs almost no W* interface rotation (~8 deg residual).
@@ -59,8 +70,13 @@ def make_free_camera(azimuth: float, elevation: float, distance: float, lookat) 
 
 
 def build_franka_robotiq(menagerie_dir: str = DEFAULT_MENAGERIE, add_camera: bool = True,
-                         add_target: bool = False):
-    """Return a compiled ``mujoco.MjModel`` of the Franka + Robotiq DROID-style scene."""
+                         add_target: bool = False, add_object: bool = False,
+                         add_zone: bool = False):
+    """Return a compiled ``mujoco.MjModel`` of the Franka + Robotiq DROID-style scene.
+
+    ``add_object`` adds a graspable free-joint cube on the table and ``add_zone`` a visual
+    place-target marker -- the manipulands for the closed-loop grasp/place benchmark.
+    """
     import mujoco
 
     arm_path = os.path.join(menagerie_dir, "franka_emika_panda", "panda_nohand.xml")
@@ -128,6 +144,33 @@ def build_franka_robotiq(menagerie_dir: str = DEFAULT_MENAGERIE, add_camera: boo
         marker.type = mujoco.mjtGeom.mjGEOM_SPHERE
         marker.size = [0.02, 0.0, 0.0]
         marker.rgba = [0.9, 0.2, 0.2, 0.55]
+        marker.contype = 0
+        marker.conaffinity = 0
+        marker.group = 1
+
+    if add_object:
+        cube = world.add_body()
+        cube.name = CUBE_BODY
+        cube.pos = list(CUBE_START)
+        cube.add_freejoint()
+        g = cube.add_geom()
+        g.name = CUBE_GEOM
+        g.type = mujoco.mjtGeom.mjGEOM_BOX
+        g.size = [CUBE_HALF, CUBE_HALF, CUBE_HALF]
+        g.rgba = [0.85, 0.15, 0.15, 1.0]
+        g.friction = [1.0, 0.05, 0.01]  # high tangential friction so the gripper can hold it
+        g.condim = 4
+        g.density = 400.0  # ~26 g for a 4 cm cube: light enough for a reliable 2F-85 grasp
+
+    if add_zone:
+        zone = world.add_body()
+        zone.name = PLACE_ZONE_BODY
+        zone.pos = list(PLACE_ZONE_CENTER)
+        marker = zone.add_geom()
+        marker.name = "place_zone_marker"
+        marker.type = mujoco.mjtGeom.mjGEOM_CYLINDER
+        marker.size = [PLACE_ZONE_RADIUS, 0.001, 0.0]
+        marker.rgba = [0.2, 0.7, 0.2, 0.40]
         marker.contype = 0
         marker.conaffinity = 0
         marker.group = 1

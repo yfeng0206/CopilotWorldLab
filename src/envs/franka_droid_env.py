@@ -27,11 +27,18 @@ import numpy as np
 
 from src.envs.franka_build import (
     ARM_HOME_QPOS,
+    CUBE_BODY,
+    CUBE_HALF,
+    CUBE_START,
     EE_SITE,
     GRIPPER_ACTUATOR,
     GRIPPER_DRIVER_JOINT,
     GRIPPER_DRIVER_RANGE,
+    PLACE_ZONE_BODY,
+    PLACE_ZONE_CENTER,
+    PLACE_ZONE_RADIUS,
     PLANNING_CAMERA,
+    TABLE_TOP_Z,
     build_franka_robotiq,
     make_free_camera,
 )
@@ -62,14 +69,19 @@ class FrankaDroidEnv:
         max_rotation: float = MAX_ROTATION,
         ik_fail_tol: float = IK_FAIL_TOL,
         ik_rot_fail_tol: float = IK_ROT_FAIL_TOL,
+        add_object: bool = False,
+        add_zone: bool = False,
         seed: int = 0,
     ) -> None:
         import mujoco
 
         self._mujoco = mujoco
+        self.add_object = bool(add_object)
+        self.add_zone = bool(add_zone)
+        _build_kwargs = dict(add_object=self.add_object, add_zone=self.add_zone)
         self.model = (
-            build_franka_robotiq(menagerie_dir) if menagerie_dir
-            else build_franka_robotiq()
+            build_franka_robotiq(menagerie_dir, **_build_kwargs) if menagerie_dir
+            else build_franka_robotiq(**_build_kwargs)
         )
         self.data = mujoco.MjData(self.model)
         self._ik_data = mujoco.MjData(self.model)  # scratch for IK forward-kinematics
@@ -99,6 +111,18 @@ class FrankaDroidEnv:
             raise ValueError(f"gripper driver joint '{GRIPPER_DRIVER_JOINT}' not found")
         self._grip_qadr = int(self.model.jnt_qposadr[grip_jid])
 
+        # Manipuland (cube) + place zone, if present: resolve body ids and the cube's free-joint
+        # qpos address so we can place/read its pose for scripted control and hidden success.
+        self._cube_bid = -1
+        self._cube_qadr = -1
+        self._zone_bid = -1
+        if self.add_object:
+            self._cube_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, CUBE_BODY)
+            cube_jid = int(self.model.body_jntadr[self._cube_bid])
+            self._cube_qadr = int(self.model.jnt_qposadr[cube_jid])
+        if self.add_zone:
+            self._zone_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, PLACE_ZONE_BODY)
+
         self._gripper_cmd = 0.0  # commanded gripper in [0, 1] (0 = open, 1 = closed)
         self.last_ik_pos_err = 0.0
         self.last_ik_rot_err = 0.0
@@ -107,14 +131,75 @@ class FrankaDroidEnv:
         self.reset()
 
     # ------------------------------------------------------------------ state
-    def reset(self) -> dict:
+    def reset(self, cube_xy=None) -> dict:
         self._mujoco.mj_resetData(self.model, self.data)
         self.data.qpos[:ARM_DOF] = ARM_HOME_QPOS
         self.data.ctrl[:ARM_DOF] = ARM_HOME_QPOS  # position servos hold home
         self._set_gripper_cmd(0.0)
         self.last_action_ok = True
+        if self._cube_qadr >= 0:
+            self._place_cube(cube_xy)
         self._mujoco.mj_forward(self.model, self.data)
+        if self._cube_qadr >= 0:
+            self.data.qvel[:] = 0.0
+            for _ in range(60):  # let the cube settle on the table before the episode starts
+                self._mujoco.mj_step(self.model, self.data)
         return self.get_observation()
+
+    def _place_cube(self, cube_xy=None) -> None:
+        """Set the cube's free-joint pose to a resting start on the table (upright)."""
+        x, y, _ = CUBE_START if cube_xy is None else (float(cube_xy[0]), float(cube_xy[1]), 0.0)
+        z = TABLE_TOP_Z + CUBE_HALF
+        self.data.qpos[self._cube_qadr:self._cube_qadr + 3] = [x, y, z]
+        self.data.qpos[self._cube_qadr + 3:self._cube_qadr + 7] = [1.0, 0.0, 0.0, 0.0]
+
+    # ------------------------------------------------------- privileged object truth
+    def object_pose(self) -> np.ndarray:
+        """Cube pose [x, y, z, qw, qx, qy, qz] (world). NaN if no object in the scene."""
+        if self._cube_bid < 0:
+            return np.full(7, np.nan, dtype=np.float64)
+        return np.concatenate([self.data.xpos[self._cube_bid].copy(),
+                               self.data.xquat[self._cube_bid].copy()])
+
+    def object_position(self) -> np.ndarray:
+        return self.object_pose()[:3]
+
+    def object_speed(self) -> float:
+        """Cube linear speed (m/s); used to check the object has settled."""
+        if self._cube_bid < 0:
+            return float("nan")
+        return float(np.linalg.norm(self.data.cvel[self._cube_bid][3:]))
+
+    def object_tilt(self) -> float:
+        """Angle (rad) between the cube's up-axis and world +z (0 = upright)."""
+        if self._cube_bid < 0:
+            return float("nan")
+        up = geo.quat_to_mat(self.object_pose()[3:]) @ np.array([0.0, 0.0, 1.0])
+        return float(np.arccos(np.clip(up[2], -1.0, 1.0)))
+
+    def zone_center(self) -> np.ndarray:
+        """Place-zone center xy (world). NaN if no zone in the scene."""
+        if self._zone_bid < 0:
+            return np.full(2, np.nan, dtype=np.float64)
+        return self.data.xpos[self._zone_bid][:2].copy()
+
+    def gripper_holds_object(self) -> bool:
+        """True if a gripper finger geom is in contact with the cube geom."""
+        if self._cube_bid < 0:
+            return False
+        m, d = self.model, self.data
+        for i in range(d.ncon):
+            c = d.contact[i]
+            b1 = m.geom_bodyid[c.geom1]
+            b2 = m.geom_bodyid[c.geom2]
+            if (b1 == self._cube_bid and self._is_gripper_body(b2)) or \
+               (b2 == self._cube_bid and self._is_gripper_body(b1)):
+                return True
+        return False
+
+    def _is_gripper_body(self, bid: int) -> bool:
+        name = self._mujoco.mj_id2name(self.model, self._mujoco.mjtObj.mjOBJ_BODY, int(bid)) or ""
+        return "2f85_" in name and ("pad" in name or "finger" in name or "follower" in name)
 
     def _ee_pos_quat(self):
         pos = self.data.site_xpos[self._site].copy()
