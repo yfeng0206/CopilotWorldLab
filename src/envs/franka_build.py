@@ -32,6 +32,31 @@ GRIPPER_DRIVER_JOINT = "2f85_right_driver_joint"  # measured opening, qpos in [0
 GRIPPER_DRIVER_RANGE = 0.8
 ARM_HOME_QPOS = [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853]
 
+# Best zero-shot planning camera from the camera-placement ablation
+# (docs/experiments/energy_landscape_and_camera_ablation.md): an opposite-shoulder, high
+# exocentric free camera that needs almost no W* interface rotation (~8 deg residual).
+PLANNING_CAMERA = {"azimuth": -45.0, "elevation": -45.0, "distance": 1.5,
+                   "lookat": (0.5, 0.0, 0.35)}
+
+
+def make_free_camera(azimuth: float, elevation: float, distance: float, lookat) -> "object":
+    """Build a free ``mujoco.MjvCamera`` (azimuth/elevation/distance about a lookat point).
+
+    Used for the camera-placement ablation and for the validated planning view
+    (``PLANNING_CAMERA``); pass the returned camera to ``Renderer.update_scene``.
+    """
+    import mujoco
+    import numpy as np
+
+    cam = mujoco.MjvCamera()
+    cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+    cam.azimuth = float(azimuth)
+    cam.elevation = float(elevation)
+    cam.distance = float(distance)
+    cam.lookat[:] = np.asarray(lookat, dtype=np.float64)
+    return cam
+
+
 
 def build_franka_robotiq(menagerie_dir: str = DEFAULT_MENAGERIE, add_camera: bool = True,
                          add_target: bool = False):

@@ -37,6 +37,18 @@ def test_build_compiles_with_expected_structure():
     assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "2f85_fingers_actuator") >= 0
 
 
+def test_planning_camera_helper_builds_free_camera():
+    import mujoco
+
+    from src.envs.franka_build import PLANNING_CAMERA, make_free_camera
+
+    cam = make_free_camera(**PLANNING_CAMERA)
+    assert cam.type == mujoco.mjtCamera.mjCAMERA_FREE
+    assert cam.azimuth == PLANNING_CAMERA["azimuth"]
+    assert cam.distance == PLANNING_CAMERA["distance"]
+    np.testing.assert_allclose(cam.lookat, PLANNING_CAMERA["lookat"])
+
+
 # ----------------------------------------------------------------------- the IK
 def test_ik_reaches_reachable_pose():
     import mujoco

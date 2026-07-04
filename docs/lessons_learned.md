@@ -88,11 +88,16 @@ not sneak back in.
 
 ### 11. robosuite 1.5.2 is incompatible with mujoco 3.10
 - **What happens**: `robosuite.make(...).reset()` raises `TypeError: mj_fullM(): incompatible
-  function arguments` -- robosuite's OSC controller calls `mj_fullM(model, dst, qM)` (old
-  2-arg-ish form) but mujoco 3.10 requires `mj_fullM(model, data, dst)`.
-- **Rule**: robosuite needs a mujoco version matching its release (~3.3.x). Our stack pins
-  mujoco 3.10 (torch + our env), so we use our own Franka+IK env; only adopt robosuite in a
-  separate env or once it supports 3.10.
+  function arguments`. Re-confirmed 2026-07-04: it fails even with the BASIC (non-OSC)
+  controller, so it is in the core dynamics path, not just the OSC controller. robosuite
+  1.5.2 is the latest release and still calls the old 2-arg `mj_fullM`; mujoco 3.10 requires
+  `mj_fullM(model, data, dst)`.
+- **Rule**: robosuite needs an older mujoco (~3.2.x). Our stack pins mujoco 3.10 for
+  `FrankaDroidEnv` (the mjSpec composition API), so downgrading is not an option. Decision:
+  do NOT adopt robosuite in the main env; if a standard third-party benchmark is ever needed,
+  create a SEPARATE venv pinned to a compatible mujoco. It is not required for this project --
+  robosuite is not what V-JEPA 2-AC uses (real Franka/DROID hardware), and `FrankaDroidEnv`
+  already reproduces that hardware faithfully.
 
 ### 12. Differential IK returns a stale residual unless recomputed after the loop
 - **What happens**: The residual is computed at the top of each iteration, before the last

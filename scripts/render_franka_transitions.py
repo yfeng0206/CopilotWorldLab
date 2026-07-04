@@ -32,6 +32,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.envs.franka_droid_env import FrankaDroidEnv  # noqa: E402
+from src.envs.franka_build import PLANNING_CAMERA, make_free_camera  # noqa: E402
 
 # Workspace point the free cameras aim at (table top, roughly where the arm works).
 LOOKAT = (0.5, 0.0, 0.35)
@@ -39,13 +40,15 @@ LOOKAT = (0.5, 0.0, 0.35)
 # Free-camera placements to ablate: (azimuth_deg, elevation_deg, distance_m). Azimuth sweeps
 # the viewing side, elevation the height; "top_down" mimics a wrist camera (out of
 # distribution). "exo_named" (added separately) is the exact built-in exo_cam reference.
+# az45_el45 is PLANNING_CAMERA (the validated best zero-shot view).
 FREE_CAMERAS = {
     "az135_el20": (-135.0, -20.0, 1.5),   # over-the-shoulder, low
     "az135_el45": (-135.0, -45.0, 1.5),   # over-the-shoulder, high
     "az90_el20": (-90.0, -20.0, 1.5),     # side, low
     "az90_el45": (-90.0, -45.0, 1.5),     # side, high
     "az45_el20": (-45.0, -20.0, 1.5),     # opposite shoulder, low
-    "az45_el45": (-45.0, -45.0, 1.5),     # opposite shoulder, high
+    "az45_el45": (PLANNING_CAMERA["azimuth"], PLANNING_CAMERA["elevation"],
+                  PLANNING_CAMERA["distance"]),  # validated planning view
     "top_down": (-90.0, -85.0, 1.4),      # near top-down (wrist-like, out of distribution)
 }
 
@@ -57,16 +60,6 @@ def canonical_actions(step: float):
         "py": [0.0, step, 0.0, 0, 0, 0, 0.0], "ny": [0.0, -step, 0.0, 0, 0, 0, 0.0],
         "pz": [0.0, 0.0, step, 0, 0, 0, 0.0], "nz": [0.0, 0.0, -step, 0, 0, 0, 0.0],
     }
-
-
-def make_free_camera(mujoco, azimuth, elevation, distance, lookat):
-    cam = mujoco.MjvCamera()
-    cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-    cam.azimuth = float(azimuth)
-    cam.elevation = float(elevation)
-    cam.distance = float(distance)
-    cam.lookat[:] = np.asarray(lookat, dtype=np.float64)
-    return cam
 
 
 def main() -> None:
@@ -90,7 +83,7 @@ def main() -> None:
 
     env = FrankaDroidEnv(render_width=args.size, render_height=args.size)
     renderer = mujoco.Renderer(env.model, height=args.size, width=args.size)
-    free_cams = {name: make_free_camera(mujoco, *p, LOOKAT) for name, p in FREE_CAMERAS.items()}
+    free_cams = {name: make_free_camera(*p, LOOKAT) for name, p in FREE_CAMERAS.items()}
     cam_names = list(FREE_CAMERAS) + ["exo_named"]
 
     def render_from(cam_key):
