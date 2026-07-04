@@ -113,11 +113,14 @@ def main() -> None:
 
     with RobomimicDemoRenderer(dataset, height=args.height, width=args.width) as rndr:
         cams = [args.camera, args.alt_camera]
-        logger.info("dataset=%s cameras=%s planning=%s", os.path.basename(dataset),
-                    rndr.cameras, args.camera)
+        logger.info("dataset=%s planning=%s alt=%s", os.path.basename(dataset),
+                    args.camera, args.alt_camera)
         for di, demo_name in enumerate(rndr.demo_names[: args.demos]):
             rndr.load_demo(demo_name)
             T = rndr.num_frames
+            if di == 0:
+                logger.info("model cameras=%s | object=%s eef=%s",
+                            rndr.cameras, rndr.object_body, rndr.eef_site)
             for cam in cams:
                 if cam not in rndr.cameras:
                     logger.error("camera %s not in model %s", cam, rndr.cameras)
