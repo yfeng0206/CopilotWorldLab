@@ -27,6 +27,7 @@ logs/
 
 # Generated proposal artifacts / proposal workflow (kept local, not committed)
 *.docx
+*.pdf
 scripts/proposal/
 fig_*.png
 

@@ -1,4 +1,5 @@
-from src.envs.mujoco_scene import MujocoPilotEnv, STATE_DIM
+from src.envs.franka_droid_env import FrankaDroidEnv, STATE_DIM
+from src.envs.franka_build import PLANNING_CAMERA
 
-__all__ = ["MujocoPilotEnv", "STATE_DIM"]
+__all__ = ["FrankaDroidEnv", "STATE_DIM", "PLANNING_CAMERA"]
 

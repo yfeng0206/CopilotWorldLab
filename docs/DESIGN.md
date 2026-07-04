@@ -40,6 +40,33 @@ a single unified latent. We are currently on **Phase 0**. The technical flow for
 Downstream application context (self-driving-lab labware insertion) and the confidence-gate thesis
 are unchanged; the phases above develop the coarse controller that the application needs.
 
+### Embodiment: Franka in sim, UR7e on hardware
+
+- **Simulation (now): Franka Panda + Robotiq 2F-85.** We deliberately use a Franka arm in MuJoCo
+  because V-JEPA 2-AC was trained on real Franka/DROID video (arXiv:2506.09985) -- matching the
+  paper's embodiment is what makes the zero-shot reproduction and any sim benchmark faithful
+  ("paper authenticity"). `FrankaDroidEnv` is this substrate.
+- **Physical (later): Universal Robots UR7e + Robotiq 2F-85/2F-140.** The real self-driving-lab
+  system in the project proposal runs on a UR7e with an Intel RealSense **D405 wrist camera** and
+  on-robot Jetson Thor inference. The sim-trained interface/policy transfers to the UR7e for the
+  physical demo; the 7-D EE contract is embodiment-agnostic, so only the arm/URDF and calibration
+  change, not the world-model interface.
+- **Wrist/POV camera = RealSense D405.** The first-person view that Phases 2-4 add corresponds to
+  the proposal's D405 wrist camera used for the classical visual-servo seat. Our roadmap extends
+  that coarse-to-fine handoff from a classical servo (proposal Layer C) toward CNN matching
+  (Phase 2) and a learned cross-view latent (Phases 3-4).
+
+### Relation to the project proposal (staged plan)
+
+This repository is the **Stage-1 simulation** substrate of the broader "Copilot Automation Lab"
+proposal (learned world-model manipulation for self-driving chemistry labs; target CVPR/NeurIPS
+2027 workshop). The proposal's three control layers -- (A) LLM planner + deterministic scheduler,
+(B) world-model coarse arm control, (C) classical visual-servo precise seat, with the world
+model's own confidence as the B->C gate -- are described in Sections 2-5 below. The current code
+implements **Layer B, Option 1 (V-JEPA 2-AC MPC)**; Option 2 (a VLA-JEPA-style feed-forward
+policy), Layers A and C, and the confidence gate are future work. The proposal PDF itself is not
+tracked in this repo.
+
 ## 1. One paragraph
 
 Self-driving chemistry labs already automate experiment selection, but the robot arm is
@@ -92,14 +119,15 @@ end-effector state s_k (7-D) ------------------------------------------+  |
 ```
 
 `P` is the action-conditioned predictor; the energy `E` is the L1 latent distance to the
-goal. The MuJoCo env (`src/envs/mujoco_scene.py`) provides `x_k` (render), `s_k`
-(`get_ee_state`), applies `a` (`apply_action`), and produces `x_g`
-(`capture_goal_image`). See [`architecture.md`](architecture.md) for the exact signatures.
-The Stage-1 env uses a kinematic mocap end-effector, so it exercises the latent scoring /
-planning interface rather than real arm dynamics; the frame, scale, camera and cadence of
-that interface must be calibrated against the off-the-shelf checkpoint before any planning
-result is trusted (see [`architecture.md`](architecture.md) interface-distribution risks,
-and [`plan.md`](plan.md) next steps).
+goal. The MuJoCo env (`src/envs/franka_droid_env.py`, `FrankaDroidEnv`) provides `x_k`
+(render), `s_k` (`get_ee_state`), applies `a` (`apply_action` -- real IK + physics), and
+produces `x_g` (`capture_goal_image`). See [`architecture.md`](architecture.md) for the exact
+signatures. `FrankaDroidEnv` is a real 7-DoF arm with differential IK, contacts and a Robotiq
+gripper (grasping is physical), so it exercises real arm dynamics, not a kinematic toy; the
+frame, scale, camera and cadence of the action interface must still be calibrated against the
+off-the-shelf checkpoint before any planning result is trusted (see the camera ablation in
+[`experiments/energy_landscape_and_camera_ablation.md`](experiments/energy_landscape_and_camera_ablation.md)
+and [`plan.md`](plan.md)).
 
 ## 4. The novelty claim (stated narrowly and honestly)
 

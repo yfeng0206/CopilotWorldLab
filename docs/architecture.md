@@ -115,11 +115,19 @@ released-code default (`rollout=2`); the paper text may report horizon 1 -- we a
 rather than claim a single value. Measured timings (RTX 3090, bf16, `--chunk 200`): 100 samples
 4.4 s, 400 samples 16 s, 800 samples 32 s/action.
 
-## 8. Hardware envelope
+## 8. Embodiment and hardware envelope
 
-Windows 11, RTX 3090 (24 GB), 32 GB RAM. Sufficient for ViT-g inference, full-fidelity CEM
-(~800 samples), and predictor fine-tuning with a frozen encoder. Rendering uses the WGL backend
-(EGL/OSMesa are Linux-only). Full memory budget: [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) Section 5.
+**Embodiment.** Simulation uses a **Franka Panda + Robotiq 2F-85** (`FrankaDroidEnv`) to match
+V-JEPA 2-AC's DROID training embodiment (paper authenticity). The physical target in the project
+proposal is a **Universal Robots UR7e** with Robotiq 2F-85/2F-140 grippers, an Intel RealSense
+**D405 wrist camera** (the first-person/POV view of Phases 2-4), and on-robot Jetson Thor
+inference. The 7-D EE contract is embodiment-agnostic, so sim->hardware changes the arm and
+calibration, not the world-model interface. See [`DESIGN.md`](DESIGN.md#embodiment-franka-in-sim-ur7e-on-hardware).
+
+**Dev compute.** Windows 11, RTX 3090 (24 GB), 32 GB RAM. Sufficient for ViT-g inference,
+full-fidelity CEM (~800 samples), and predictor fine-tuning with a frozen encoder. Rendering uses
+the WGL backend (EGL/OSMesa are Linux-only). Full memory budget:
+[`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) Section 5.
 
 ## Links
 

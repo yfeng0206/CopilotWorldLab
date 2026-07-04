@@ -1,7 +1,7 @@
 """DROID-style Franka + Robotiq 2F-85 reproduction environment.
 
-Wraps the composed Franka Panda + Robotiq 2F-85 model (``franka_build``) with the same
-interface ``MujocoPilotEnv`` exposes, but backed by a real 7-DoF arm driven in
+Wraps the composed Franka Panda + Robotiq 2F-85 model (``franka_build``) with a clean
+end-effector interface, backed by a real 7-DoF arm driven in
 end-effector space via differential IK. This is the paper-faithful substrate: an
 exocentric camera, a 7-D EE state/action, and a Robotiq gripper matching DROID.
 

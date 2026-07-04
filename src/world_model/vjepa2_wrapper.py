@@ -16,7 +16,7 @@ Verified facts (arXiv:2506.09985 and facebookresearch/vjepa2)
   ~62 h of DROID robot video. Load the local file directly (the vendored repo's
   ``torch.hub`` base URL is a localhost stub); see ``load_vjepa2_ac`` below.
 - Action: a real-valued 7-D end-effector delta -- 3 position, 3 extrinsic Euler
-  orientation, 1 gripper (matches ``MujocoPilotEnv``'s state/action layout).
+  orientation, 1 gripper (matches ``FrankaDroidEnv``'s state/action layout).
 - Planning: encode current frame -> ``z_k`` and goal image -> ``z_g`` with the
   video encoder, then Cross-Entropy-Method MPC minimising the latent energy
   ``E(a; z_k, s_k, z_g) = || P(a; s_k, z_k) - z_g ||_1`` over sampled action
