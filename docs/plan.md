@@ -20,30 +20,27 @@ measurement, before any physical hardware.
 
 ## Immediate next steps (next session)
 
-Done so far: the encoder + AC predictor load from the local checkpoint and CEM latency is
-measured (`scripts/vjepa2_ac_infer_test.py`, bf16, ~32 s at 800 samples on the 3090); the
-Franka + Robotiq env (`FrankaDroidEnv`) supplies real arm/gripper dynamics behind the 7-D
-interface. Remaining, ordered to fail fast on the cheapest layer first (large-N CEM is slow
-on one 3090):
+Done so far: the encoder + AC predictor load from the local checkpoint; CEM latency measured
+(`vjepa2_ac_infer_test.py`, bf16 ~32 s at 800 samples). Interface calibration is largely done
+via the **camera-placement ablation** (`docs/experiments/energy_landscape_and_camera_ablation.md`):
+the horizontal action frame is view-relative, the best zero-shot view is `PLANNING_CAMERA`
+(az45_el45, now the `FrankaDroidEnv` default), and the first established benchmark
+(transition scoring) has a vanilla baseline. The plan is now benchmark-driven
+(`docs/experiments/benchmark_plan.md`). Remaining:
 
-1. **One-step interface calibration.** Generate known sim transitions
-   `(x_k, s_k, a_gt, x_{k+1})`; score candidate deltas through the predictor and confirm
-   `a_gt` is ranked near the latent-energy minimum. Sweep world- vs body-frame, per-axis
-   sign, and translation/rotation scale until the ground-truth action wins. This mirrors
-   the paper's own unsupervised calibration (App. B.4): drive random actions, compare
-   V-JEPA 2-AC's energy-inferred (dx, dy) against the executed actions, least-squares-fit
-   a 2x2 map `W*` (they find it is ~a rotation, condition number ~1.5, ~1.6 cm systematic
-   error), and correct inferred actions by `W*` before use. Use the third-person
-   `scene_cam` -- the model was trained only on exocentric DROID views.
-2. **Camera / cadence ablation.** Repeat (1) with `scene_cam` (third-person, DROID-like)
-   vs `wrist_cam`, and with the action interval aligned to ~4 fps (~0.25 s) rather than a
-   single sim step. Lock in the interface before planning.
-3. **CEM reach to a goal image, in the env loop.** Wire `plan_action` (following
-   `facebookresearch/vjepa2/notebooks/utils/mpc_utils.py`) into the Franka env and validate
-   the energy decreases toward a captured goal image on a one-step reach.
-4. **Trial harness + gate data.** Sample a goal pose, perturb the start pose synthetically
-   (standing in for docking error), plan, and log terminal energy, the confound baselines
-   (below), and the success label.
+1. **Freeze the interface.** `PLANNING_CAMERA` is wired as the env default; optionally fit and
+   freeze the App. B.4 `W*` horizontal rotation so lower-azimuth cameras are also usable. The
+   ablation showed the planning camera needs only ~8 deg, so this is a refinement, not a blocker.
+2. **Stand up ManiSkill (benchmark 2).** Zero-shot success on PickCube / StackCube /
+   PegInsertionSide via a thin adapter (render -> V-JEPA latent -> CEM -> step -> official
+   success), in a separate venv (SAPIEN vs our mujoco 3.10). Record the vanilla baseline.
+3. **CEM reach to a goal image, in the env loop.** Wire `plan_action` into `FrankaDroidEnv`
+   using `PLANNING_CAMERA`; validate the latent energy decreases toward a captured goal image.
+4. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
+   task data, then re-run benchmarks 1 and 2 and report improvement as metric deltas
+   (rank_frac/AUROC, success rate, CEM efficiency, energy calibration).
+5. **Confidence-gate data.** Perturb the start pose, plan, and log terminal energy + the
+   confound baselines + the success label (the project's central gate measurement).
 
 ## Stage-1 build checklist
 

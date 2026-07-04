@@ -49,11 +49,12 @@ cameras (seven free placements + the exact built-in `exo_cam`). `energy_landscap
 **Result**: transfer works qualitatively (all side cameras have healthy energy margins). Per
 camera mean cosine (argmin vs GT): az45_el45 +0.92, az45_el20 +0.89, az90_el45 +0.57,
 az90_el20 +0.50, top_down +0.19, az135_el45 +0.12, az135_el20 +0.08, exo_named -0.16. Vertical
-z transfers everywhere (pz +0.82, nz +0.72); horizontal x/y is weak.
+z usually transfers (pz +0.82, nz +0.72 averaged) with view exceptions (top_down z collapses;
+az135_el45 -z is +0.23); horizontal x/y is the hard part.
 **Confound resolved (key result)**: `scripts/analyze_frame_rotation.py` fits one in-plane
 rotation per camera mapping GT->argmin. The fitted angle tracks the camera azimuth almost
-linearly (-45->~13, -90->~55, -135->~107 deg) and every side camera recovers to cos 0.84-0.95
-after it. So the model infers horizontal actions in a VIEW-RELATIVE frame: az135 / the built-in
+linearly (-45->~13, -90->~55, -135->~107 deg) and most side cameras recover to cos 0.84-0.95
+after it (az90_el20 lower at 0.70). So the model infers horizontal actions in a VIEW-RELATIVE frame: az135 / the built-in
 exo_cam are not unusable, they need a large W* rotation (paper App. B.4). For zero-shot,
 az45_el45 is best (~8 deg residual). top_down stays at cos 0.65 even after rotation -- a genuine
 depth-observability failure, confirming exocentric-only training.

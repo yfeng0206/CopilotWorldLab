@@ -32,6 +32,12 @@ Cosine measures *direction* agreement (the landscape is smooth and only near the
 per the paper, so we do not expect exact hits). Margin measures whether the landscape is
 informative at all (near 0 = flat/blind).
 
+**Scope.** Every result here is *one-step energy / action alignment* — how well the model's
+energy ranks a single action given a context and goal frame. It is not closed-loop planning
+success (that is the ManiSkill benchmark layer in
+[benchmark_plan.md](benchmark_plan.md)). "Transfers" means the one-step energy is informative
+and directionally correct from that view, not that a full task was completed.
+
 ## Result 1 — paper example trajectory (correctness gate): PASS
 
 Grid wide enough to contain the ground-truth action (0.12, `9^3`):
@@ -149,7 +155,9 @@ Margin 2.76 | fitted W* rotation +18 deg | post-rotation cos +0.93 | improvement
 
 Margin 2.73 | fitted W* rotation **+9 deg** | post-rotation cos +0.95 | improvement **+1.08** | transfers.
 Every axis is well aligned and the required interface rotation is negligible — this is the
-zero-shot planning camera, saved as `PLANNING_CAMERA` in `src/envs/franka_build.py`.
+zero-shot planning *view* (best one-step action alignment; not yet closed-loop planning
+success), saved as `PLANNING_CAMERA` in `src/envs/franka_build.py` and used as the
+`FrankaDroidEnv` default observation camera.
 
 ## Result 3 — the horizontal action frame is view-relative (confound resolved)
 

@@ -33,21 +33,33 @@ closest prior art.
 
 ## Status
 
-Stage-1 pilot, pre-experiment setup stage -- complete. This session established a
-reproducible local environment, a DROID-style Franka arm in MuJoCo, verified loading of
-the V-JEPA 2-AC checkpoint, and a characterized inference/timing baseline on the 24 GB
-RTX 3090. No closed-loop world-model control has been run yet; that is the first
-experiment. See [`docs/setup_stage.md`](docs/setup_stage.md) for the full record (setup
-milestones, the timing table, and the audit/cleanup log).
+Stage-1 pilot. The pre-experiment setup is complete (environment, DROID-style Franka arm,
+verified V-JEPA 2-AC loading, inference/timing baseline; see
+[`docs/setup_stage.md`](docs/setup_stage.md)). Experiments have now begun, following an
+honest established-benchmark plan ([`docs/experiments/benchmark_plan.md`](docs/experiments/benchmark_plan.md)):
+test vanilla V-JEPA 2-AC on standard tasks first, then measure improvement as deltas on the
+same benchmarks.
 
-Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 29/29 tests passing):
+Results so far (see [`docs/experiments/`](docs/experiments)):
+
+- **Energy-landscape reproduction** (correctness gate): the model reproduces the paper's
+  behavior — energy minimum near the ground-truth action (reverse cos +0.98), reverse flips.
+- **Camera-placement ablation**: the horizontal action frame is view-relative; the best
+  zero-shot view (az45_el45, now `PLANNING_CAMERA`) improves action-alignment cosine by +1.08
+  over the built-in camera.
+- **Transition-scoring benchmark** (vanilla baseline): the true action beats random negatives —
+  rank 1.00 with the correct goal vs 0.30 with a shuffled goal (image-conditioned), AUROC 0.953
+  on the DROID example; the fine-tuned predictor will be measured against this.
+
+No closed-loop planning success has been measured yet (that is the ManiSkill benchmark layer).
+
+Working now (verified on Windows 11 + RTX 3090, CUDA 12.4, 31/31 tests passing):
 
 - A DROID-style Franka Panda + Robotiq 2F-85 MuJoCo env (`FrankaDroidEnv`) with dynamic
-  7-DoF end-effector control matching the V-JEPA 2-AC action layout.
-- Local V-JEPA 2-AC loading (ViT-g encoder 1.01B + AC predictor 305M) and a CEM-MPC
-  inference/timing harness: 800-sample planning in 32 s at 15 GiB (bf16, chunked),
-  consistent with the paper's 16 s on a ~1.8x-faster 4090.
-- JEPA-style logging, a download-only checkpoint fetcher, and a one-command setup script.
+  7-DoF end-effector control; observations render from the validated `PLANNING_CAMERA`.
+- Local V-JEPA 2-AC loading (ViT-g encoder 1.01B + AC predictor 305M), a CEM-MPC timing
+  harness (800 samples in 32 s at 15 GiB, bf16 chunked), and a transition-scoring benchmark.
+- JEPA-style logging, a size+SHA256-verified checkpoint fetcher, and a one-command setup script.
 
 ## Repository layout
 
