@@ -13,7 +13,30 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
-### 2026-07-04 -- Benchmark pivot: honest established-benchmark evaluation
+### 2026-07-04 -- DROID real transition-scoring baseline + robomimic Windows block
+
+#### 16. Robomimic images blocked on Windows -> DROID real baseline (benchmark 1 hardened)
+**Context**: Plan was robomimic offline datasets (Lift/Can/Square) for grasp/place transition
+scoring, then FrankaDroidEnv closed-loop. First cleaned up dead runtimes: uninstalled robosuite
+from the main venv (nothing imports it; 31 tests still pass) and removed the ManiSkill probe venv
+(lessons_learned #19).
+**Investigation**: robomimic does NOT host pre-rendered image datasets. Verified from the source:
+`ARISE-Initiative/robomimic __init__.py` registers only `raw` + `low_dim` on Hugging Face
+(`robomimic/robomimic_datasets`); every sim `image` link is `None` and must be rendered locally
+via robosuite (blocked on Windows). The HF `lift/ph` tree confirms only `demo_v15.hdf5` +
+`low_dim_v15.hdf5`; the older Stanford `image.hdf5` URLs are unreachable. So robomimic image
+transition scoring is gated on a Linux/WSL2 robosuite render.
+**Solution**: use real DROID -- V-JEPA 2-AC's own training domain and Windows-runnable via
+`lerobot/droid_100` (100 real teleop episodes, LeRobot v3.0). New
+`scripts/extract_droid_transitions.py` downloads it (huggingface_hub), decodes the av1 exterior
+camera (PyAV), reads 7-D EE state `[x,y,z,roll,pitch,yaw,gripper]`, and emits transition npz
+`(image_t, state_t) -> (image_{t+H})`, H=5, min-motion 2 cm. Also fixed the benchmark's null
+control: the mismatched goal must come from a DIFFERENT episode (a same-episode neighbour inflates
+the null to 0.74); `build_null_indices()` now draws a random different-group goal.
+**Outcome**: n=300 real DROID transitions -> **rank_frac 0.820 vs different-episode null 0.486**
+(+0.334 image-conditioning effect), top1 0.320, gap_z +1.45, AUROC 0.612. This is the honest
+established-benchmark baseline the fine-tuned predictor must beat. Figure + table + CSV committed
+under `results/benchmarks/`. Writeup: `docs/experiments/transition_scoring.md`.
 
 #### 15. Transition-scoring benchmark (vanilla baseline) + benchmark plan
 **Context**: Shift from "does it look better" to honest evaluation on established benchmarks.

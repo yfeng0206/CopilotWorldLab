@@ -41,16 +41,22 @@ higher energy than the true action; chance 0.5) as the primary metric, plus `top
 
 **Vanilla baseline (bf16, RTX 3090, K=32 negatives):**
 
-| transition set | rank_frac | null (shuffled goal) | top1 | gap_z | AUROC (pooled) |
-|---|---|---|---|---|---|
-| DROID paper example (native, fwd+rev) | **1.00** | 0.30 | 1.00 | +3.06 | 0.953 |
+| transition set | n | rank_frac | null (diff-episode goal) | top1 | gap_z | AUROC (pooled) |
+|---|---|---|---|---|---|---|
+| **DROID real (lerobot/droid_100, 20 ep, exterior cam)** | **300** | **0.820** | **0.486** | 0.320 | +1.45 | 0.612 |
+| DROID paper example (native, fwd+rev) | 2 | 1.00 | 0.30 | 1.00 | +3.06 | 0.953 |
 
-The **null control** is the key honesty check: with the *correct* goal the true action beats
-all negatives (rank 1.00), but scored against a *mismatched* (shuffled) goal the same action is
-not favored (null 0.30). This is **evidence that the vanilla model is image-goal-conditioned on
-the paper example**, not a fixed action prior. It is a smoke-scale baseline (`n=2`, the vendored
-example fwd+rev); it becomes a robust established benchmark only when run over many real DROID
-trajectories (see Scaling). Actions here are xyz-translation only (rotation/gripper zeroed).
+The **null control** is the key honesty check: with the *correct* goal the true action is
+favored (rank 0.820 on 300 real transitions), but scored against a goal from a *different
+episode* the same action drops to chance (null 0.486). The **+0.334 gap is evidence that vanilla
+V-JEPA 2-AC is image-goal-conditioned on real robot data**, not running a fixed action prior.
+The real-DROID batch (300 transitions from 20 `lerobot/droid_100` episodes via
+[`scripts/extract_droid_transitions.py`](../../scripts/extract_droid_transitions.py); figure
+[`results/benchmarks/droid_transition_scoring.png`](../../results/benchmarks/droid_transition_scoring.png))
+is the **established-benchmark baseline our fine-tuned predictor must beat** — it is harder and
+more honest than the single curated example (whose randomized exterior camera and short 5-frame
+horizon make it a realistic in-the-wild test). Actions are xyz-translation only (rotation/gripper
+zeroed). Full writeup: [transition_scoring.md](transition_scoring.md).
 
 Per-camera on our MuJoCo renders (n=18 each; tracks the camera-placement ablation exactly).
 The primary sim result is per-camera because a cross-camera aggregate (rank 0.75, null 0.55)
@@ -63,16 +69,17 @@ blends the calibrated and uncalibrated view-relative interfaces:
 | az90_el20 | 0.854 | 0.616 | | top_down | 0.615 | 0.533 |
 | az90_el45 | 0.849 | 0.589 | | exo_named (built-in) | **0.476** | 0.408 |
 
-Reading: on DROID-native transitions the vanilla model clearly understands the dynamics
-(true action beats all 32 negatives, and the null control confirms it uses the goal). Zero-shot
-to our simulator, the calibrated planning camera nearly matches DROID while the built-in exo_cam
-is at chance — consistent with the view-relative frame finding
+Reading: on real DROID transitions the vanilla model understands the dynamics (true action
+beats ~82% of random negatives, and the different-episode null control confirms it uses the
+goal image). Zero-shot to our simulator, the calibrated planning camera nearly matches DROID
+while the built-in exo_cam is at chance — consistent with the view-relative frame finding
 ([energy_landscape_and_camera_ablation.md](energy_landscape_and_camera_ablation.md)). This is
 the **baseline our fine-tuned predictor must beat** on the same metric. It is a one-step scoring
 benchmark, not closed-loop planning success (that is the ManiSkill layer below).
 
-Scaling: today's DROID number uses the vendored single example trajectory (n=2). To harden it,
-score a batch of real DROID trajectories (dataset download; same script, `--traj`).
+Scaling: **DONE** — the real DROID batch (n=300) above is the established baseline.
+[`scripts/extract_droid_transitions.py`](../../scripts/extract_droid_transitions.py) downloads
+`lerobot/droid_100` and emits transition npz; increasing `--max-episodes` scales n further.
 
 ### 2. ManiSkill standard tasks — established sim benchmark (next)
 
@@ -92,10 +99,17 @@ loop -> step the env -> official success. Two options: (a) run ManiSkill under W
 (b) treat the working MuJoCo `FrankaDroidEnv` as the closed-loop platform and add proper
 pick/place tasks with success labels there (needs the graspable-object scene).
 
-### 3. robomimic / LIBERO — only if needed
+### 3. robomimic / LIBERO — image datasets blocked on Windows
 
-Established imitation-learning demos; higher integration overhead. Use their existing demos in a
-separate env if MuJoCo/robosuite conflict. Deferred unless (2) is insufficient.
+Established imitation-learning demos (Lift, Can, Square, Transport) were the intended
+grasp/place transition-scoring source. Verified 2026-07-04: robomimic (v0.5) hosts only
+`low_dim` (proprioception + actions, **no images**) and `raw` (sim states) datasets on Hugging
+Face; the pre-rendered `image` hdf5 links are `None` and must be rendered locally via robosuite
+— which does not run on Windows (lessons_learned #11). The older Stanford-hosted `image.hdf5`
+URLs are unreachable. So robomimic image transition scoring is **gated on a Linux/WSL2 robosuite
+render**. We use **real DROID** (benchmark 1 above) as the Windows-runnable established grasp/
+place transition source instead; it is also V-JEPA 2-AC's own training domain. Revisit robomimic
+if a Linux render pass is set up.
 
 ### 4. Custom labware env — last (application demo, not the first benchmark)
 
@@ -105,7 +119,7 @@ dataset before proving the method. This intentionally deprioritizes the earlier 
 
 ## Minimal first research loop
 
-1. Run vanilla V-JEPA 2-AC on transition scoring. **DONE** — baseline table above.
+1. Run vanilla V-JEPA 2-AC on transition scoring. **DONE** — DROID real baseline (n=300) above.
 2. Run vanilla V-JEPA 2-AC on 2-3 ManiSkill tasks (zero-shot success). NEXT (separate venv).
 3. Fine-tune only the predictor on small task data (frozen encoder; see
    [vjepa2_ac_architecture.md](../vjepa2_ac_architecture.md)).
@@ -124,7 +138,11 @@ dataset before proving the method. This intentionally deprioritizes the earlier 
 
 ## Reproducibility
 
-- Benchmark 1 (DROID example): `python scripts/benchmark_transition_scoring.py`.
+- Benchmark 1 (DROID real batch): `python scripts/extract_droid_transitions.py --max-episodes 20
+  --per-episode 15` then `python scripts/benchmark_transition_scoring.py --traj "outputs/droid_transitions/*.npz"`;
+  figure with `python scripts/plot_transition_benchmark.py`.
+- Benchmark 1 (DROID paper example): `python scripts/benchmark_transition_scoring.py`.
 - Benchmark 1 (sim, per camera): `python scripts/benchmark_transition_scoring.py --traj "outputs/transitions/*.npz"`
   (render first with `scripts/render_franka_transitions.py --step 0.06 --poses 3`).
-- Metrics are seeded (`--seed`, K negatives per transition); per-run CSV in `logs/`.
+- Metrics are seeded (`--seed`, K negatives per transition); per-run CSV in `logs/`, committed
+  summary in [`results/benchmarks/`](../../results/benchmarks).

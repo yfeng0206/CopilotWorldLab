@@ -22,22 +22,27 @@ measurement, before any physical hardware.
 
 Done so far: encoder + AC predictor load; CEM latency measured (~32 s at 800 samples);
 interface calibration via the **camera ablation** (view-relative frame; `PLANNING_CAMERA` =
-az45_el45 is the `FrankaDroidEnv` default); **benchmark 1** (transition scoring) vanilla baseline
-(rank 1.00 vs null 0.30, AUROC 0.953 DROID); and **Phase 1 closed-loop CEM** to a goal image
+az45_el45 is the `FrankaDroidEnv` default); **benchmark 1** (transition scoring) hardened on a
+**real DROID batch** (n=300 from `lerobot/droid_100`): rank_frac **0.820** vs different-episode
+null **0.486** (+0.334 image-conditioning effect), top1 0.320, gap_z +1.45
+(`docs/experiments/transition_scoring.md`); and **Phase 1 closed-loop CEM** to a goal image
 (`docs/experiments/cem_closed_loop.md`) -- reach succeeds (goal image in 3 steps), multi-goal
 chaining works, and the ~3 cm precision floor is diagnosed as a model/interface limit (tracking
-error only 9 mm), motivating W* + fine-tuning. The plan is benchmark-driven
-(`docs/experiments/benchmark_plan.md`). Remaining:
+error only 9 mm), motivating W* + fine-tuning. robomimic/robosuite/ManiSkill image benchmarks are
+Windows-blocked (lessons #11/#18/#19), so DROID is the established grasp/place source. The plan is
+benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
 1. **W* calibration + re-run Phase 1.** Fit/freeze the App. B.4 horizontal rotation for the
    planning camera and re-run the CEM chain; expect the lateral sub-goal to converge -- the first
    improvement delta on our own closed-loop benchmark.
-2. **ManiSkill (benchmark 2).** Separate venv (SAPIEN); adapter render -> V-JEPA latent -> the
-   Phase-1 CEM loop -> step -> official success on PickCube / StackCube / PegInsertionSide.
-3. **Harden benchmark 1 on a DROID batch.** Score many real DROID trajectories for a statistical
-   rank_frac/AUROC (needs the DROID dataset in the npz format).
-4. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
-   task data; re-run benchmarks 1-2 + Phase 1 and report improvement as metric deltas.
+2. **FrankaDroidEnv closed-loop pick/place.** Extend `cem_reach_loop.py` with gripper sub-goals
+   (reach -> close -> lift -> move -> open) on a graspable-object scene; the Windows-runnable
+   closed-loop success benchmark (ManiSkill/robosuite need Linux/WSL2).
+3. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
+   task data; re-run benchmark 1 (same n/H/K/seed) + Phase 1 and report improvement as metric
+   deltas vs the DROID baseline (rank 0.820, top1 0.320).
+4. **ManiSkill (benchmark 2, Linux/WSL2).** Adapter render -> V-JEPA latent -> Phase-1 CEM loop ->
+   step -> official success on PickCube / StackCube / PegInsertionSide (gated on a Linux env).
 5. **Confidence-gate data.** Perturb the start pose, plan, log terminal energy + confound
    baselines + success label (the project's central gate measurement).
 
