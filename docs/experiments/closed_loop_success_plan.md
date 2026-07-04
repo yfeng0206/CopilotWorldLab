@@ -36,20 +36,53 @@ runtime), so robomimic is the primary source.
 baseline → Stage 3 → Stage 4 (only after a solid vanilla baseline) → Stage 5. Each coding step is
 committed and paused for manual audit before the next.
 
-**The closed-loop crux (Stage 2).** robomimic gives offline demos + a steppable `model_file` XML.
-robosuite's own runtime (`env.step`) is blocked on Windows (mujoco 3.10 `mj_fullM`, lessons #11).
-Two ways to get closed-loop control:
-- **Option A (preferred):** wrap the robomimic `model_file` XML in a **plain-MuJoCo steppable
-  env** (`src/envs/robomimic_scene.py`) that we step with `mujoco.mj_step` and our **own** IK /
-  position controller (as `FrankaDroidEnv` already does), setting `data.ctrl` directly. This
-  never calls robosuite's controller, so it avoids `mj_fullM` — closed-loop on the **established
-  scene**. Requires mapping V-JEPA's xyz+gripper action → joint targets → actuator ctrl for the
-  robomimic Panda XML.
-- **Option B (fallback):** run closed-loop on our `FrankaDroidEnv` extended with graspable objects
-  + target zones that **mirror** the robomimic tasks (cube for Lift, can+bin for Can, peg for
-  Square). Established scene informs object/target choices; the env is ours.
+**The closed-loop crux (Stage 2) — decision: our own honest env, reproduce the paper's MPC.**
+We are **not** using robosuite for the closed-loop benchmark. robosuite 1.5.2 calls the old
+`mujoco.mj_fullM(model, dst, qM)` (2-array) signature at
+`controllers/parts/controller.py:227`, but mujoco >= ~3.a changed the Python binding to
+`mj_fullM(m, d, dst)`; with our mujoco 3.10 `env.step` raises `TypeError` (re-confirmed
+2026-07-04). It would run only in a **separate venv with a pinned older mujoco** (~3.3.0 still has
+the 2-array binding), which we are choosing **not** to maintain. Instead (user directive: honest,
+established-style, not a toy, no hacking) we build our **own** small MuJoCo grasp/place env with
+**real physics and hidden privileged success**, and reproduce the paper's planning loop faithfully.
 
-Start Stage 2 with Option A on Lift; fall back to B only if the controller port is unreliable.
+### Verified planning config (primary source: Meta's released code)
+
+From `third_party/vjepa2/notebooks/utils/world_model_wrapper.py` (the `WorldModel` MPC defaults)
+and `.../mpc_utils.py::cem` — the exact procedure we reproduce:
+
+| param | released code | paper (real robot) | our runs |
+|---|---|---|---|
+| horizon `rollout` (T) | **2** | 2 | 2 (ablate T=1) |
+| population `samples` | **400** | ~800 | staged 100 -> 200 -> 800 |
+| CEM iterations `cem_steps` | **10** | 10 | 10 |
+| `topk` | 10 | 10 | 10 |
+| `maxnorm` (per-axis action clip) | 0.05 m | 0.05 m | 0.05 m |
+| momentum (mean/std) | 0.15 | - | 0.15 |
+| objective | mean-L1 in **layer-norm'd** latent space | L1 energy | same |
+| replan | receding horizon (re-encode, replan) | receding horizon | same |
+
+CEM samples xyz + gripper (rotation zeroed); the world-model rollout predicts `rollout` steps and
+compares the **final** predicted latent to the goal latent; top-k update; the returned action
+trajectory's first step(s) are executed, then re-plan. This is exactly what
+`scripts/cem_reach_loop.py` already calls, so the benchmark reuses it.
+
+### Staged run cadence (user directive)
+
+1. **Validate the loop** — 3 tasks x 5-8 actions, small `samples`; confirm the closed loop runs
+   and latent energy / distance decrease. (Not a result, a wiring check.)
+2. **Sweep** — 20 trials at `samples=100` and 20 at `samples=200` (randomized init); compare
+   success / energy / CEM time. Pick the operating point the 3090 can afford.
+3. **Final** — the selected run at `samples=800` (T=1 and/or T=2) for the headline vanilla number.
+
+Improvement (the goal) comes from W* frame calibration and predictor fine-tuning re-run on the
+**same** tasks/seeds/config (Stage 4).
+
+**Env for Stage 2:** extend our MuJoCo Franka scene with graspable objects + a target zone
+(honest physics, not a toy), render the validated planning camera, and get image goals from a
+**scripted expert** execution (move-to-grasp / close / lift / move-to-place / open) whose key
+frames are the sub-goal images. Success is judged only by hidden privileged state (Section 4),
+never by matching the scripted trajectory.
 
 ---
 

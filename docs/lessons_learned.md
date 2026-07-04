@@ -92,15 +92,15 @@ not sneak back in.
   controller, so it is in the core dynamics path, not just the OSC controller. robosuite
   1.5.2 is the latest release and still calls the old 2-arg `mj_fullM`; mujoco 3.10 requires
   `mj_fullM(model, data, dst)`.
-- **Rule**: robosuite needs an older mujoco (~3.2.x). Our stack pins mujoco 3.10 for
-  `FrankaDroidEnv` (the mjSpec composition API), so downgrading is not an option. The
-  incompatibility is in the **dynamics/stepping** path — so robosuite `env.reset()/step()`
-  (closed-loop rollout) does not run. **But raw-state RENDERING works on Windows**: read a
-  robomimic `raw` demo, use its embedded `model_file`, set `qpos` from the saved states, and
-  render with MuJoCo directly (no `mj_fullM`, no dynamics). That is enough to replay
-  Lift/Can/Square as image trajectories with actions + success labels. Rule: do not rely on
-  robosuite *runtime* in the main env; use raw-state replay for datasets, and a SEPARATE
-  mujoco-pinned venv only if closed-loop robosuite/ManiSkill rollout is ever needed.
+- **Root cause (confirmed 2026-07-04)**: robosuite calls the old 2-array binding
+  `mujoco.mj_fullM(self.sim.model._model, mass_matrix, self.sim.data.qM)` at
+  `robosuite/controllers/parts/controller.py:227`; mujoco >= ~3.a changed the Python binding to
+  `mj_fullM(m, d, dst)`, so with mujoco 3.10 `env.step` raises `TypeError`. robosuite 1.5.2
+  *requires* `mujoco>=3.3.0`, and 3.3.0 still ships the 2-array binding -- so robosuite runs only
+  in a **separate venv pinned to mujoco ~3.3.x**. **Decision:** we do NOT maintain that venv;
+  the closed-loop benchmark uses our own honest MuJoCo grasp/place env instead
+  (docs/experiments/closed_loop_success_plan.md). Raw-state *rendering* (no stepping) still works
+  fine in the main env.
 
 ### 12. Differential IK returns a stale residual unless recomputed after the loop
 - **What happens**: The residual is computed at the top of each iteration, before the last
