@@ -24,8 +24,9 @@ transition scoring, 2 ManiSkill, 3 robomimic/LIBERO, 4 custom labware last; 5-st
 latent energy of the TRUE action vs K=32 random same-magnitude negatives per transition.
 Primary metric = within-transition rank_frac; adds a shuffled-goal NULL control.
 **Result (vanilla, bf16)**: DROID example rank_frac=1.00, null=0.30, AUROC 0.953 -- the true
-action beats all negatives toward the correct goal but NOT a shuffled goal, so this is genuine
-image-goal-conditioned understanding, not an action prior. MuJoCo per-camera tracks the camera
+action beats all negatives toward the correct goal but NOT a shuffled goal, so it is
+image-goal-conditioned on the paper example (a smoke-scale n=2 baseline; a robust number needs
+many real DROID trajectories). MuJoCo per-camera tracks the camera
 ablation: az45_el45 0.958 (null 0.670), exo_named 0.476 (null 0.408); aggregate 0.75.
 **Audit** (rubber-duck gpt-5.5 xhigh): no code bugs (scoring matches the audited sibling,
 AUROC math correct). Applied: within-transition rank_frac as primary (pooled AUROC relabeled),

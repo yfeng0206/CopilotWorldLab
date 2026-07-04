@@ -101,6 +101,22 @@ python scripts\download_checkpoints.py            # action-conditioned checkpoin
 python scripts\download_checkpoints.py --encoder vitl   # optional encoder-only
 ```
 
+### Vendored third-party repos (required by the model + Franka scripts)
+
+These are gitignored (large / separate history) and must be fetched once. The V-JEPA 2-AC
+scripts import `third_party/vjepa2`; the Franka env needs MuJoCo Menagerie:
+
+```powershell
+# V-JEPA 2 code, pinned to the commit the scripts were verified against
+git clone https://github.com/facebookresearch/vjepa2 third_party/vjepa2
+git -C third_party/vjepa2 checkout 204698b
+
+# MuJoCo Menagerie: Franka Panda + Robotiq 2F-85 (sparse checkout)
+git clone --depth 1 --filter=blob:none --sparse `
+  https://github.com/google-deepmind/mujoco_menagerie.git third_party/mujoco_menagerie
+git -C third_party/mujoco_menagerie sparse-checkout set franka_emika_panda robotiq_2f85
+```
+
 ## Roadmap
 
 - Stage 1 (in progress): the software pilot -- MuJoCo scene, world-model coarse

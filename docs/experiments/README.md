@@ -27,6 +27,7 @@ the near top-down view has a genuine depth-observability failure.
 ```
 docs/experiments/
   README.md                                    this index
+  benchmark_plan.md                            established-benchmark strategy + metrics + stack
   energy_landscape_and_camera_ablation.md      correctness gate + camera ablation + frame analysis
 results/camera_ablation/
   camera_grid.png          the 8 camera angles, annotated with cosine / rotation / verdict

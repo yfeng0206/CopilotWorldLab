@@ -1,0 +1,3 @@
+tag,camera,e_true,e_neg_mean,rank_frac,null_rank_frac,top1,gap_z
+droid_example_fwd,droid,0.425,0.4573,1.0,0.562,1,2.026
+droid_example_rev,droid,0.4365,0.4717,1.0,0.031,1,4.1

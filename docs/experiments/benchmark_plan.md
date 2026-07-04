@@ -47,8 +47,10 @@ higher energy than the true action; chance 0.5) as the primary metric, plus `top
 
 The **null control** is the key honesty check: with the *correct* goal the true action beats
 all negatives (rank 1.00), but scored against a *mismatched* (shuffled) goal the same action is
-not favored (null 0.30). So this is genuine image-goal-conditioned transition understanding,
-not a fixed action prior.
+not favored (null 0.30). This is **evidence that the vanilla model is image-goal-conditioned on
+the paper example**, not a fixed action prior. It is a smoke-scale baseline (`n=2`, the vendored
+example fwd+rev); it becomes a robust established benchmark only when run over many real DROID
+trajectories (see Scaling). Actions here are xyz-translation only (rotation/gripper zeroed).
 
 Per-camera on our MuJoCo renders (n=18 each; tracks the camera-placement ablation exactly).
 The primary sim result is per-camera because a cross-camera aggregate (rank 0.75, null 0.55)
