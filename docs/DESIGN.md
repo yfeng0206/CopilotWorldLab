@@ -4,6 +4,42 @@ The design and the honest novelty claim for CopilotWorldLab. This is a working r
 note: quantitative claims are verified against primary sources (see
 [`related_work.md`](related_work.md)) but should be re-checked before publication.
 
+## 0. Project roadmap (phases)
+
+The through-line: reproduce V-JEPA 2-AC as a coarse latent world-model controller, benchmark it
+honestly, then improve manipulation by **fusing a third-person view with a first-person (wrist)
+view** -- first as a coarse-to-fine handoff, then as a learned cross-view latent, and finally as
+a single unified latent. We are currently on **Phase 0**. The technical flow for each phase is in
+[`architecture.md`](architecture.md) (flowchart).
+
+- **Phase 0 -- Setup + reproduce (current).** Load V-JEPA 2-AC, set up the environment, and
+  verify the world model reproduces the paper: energy-landscape sanity, transition scoring on real
+  DROID, and closed-loop CEM to goal images. Build our own honest MuJoCo grasp/place env
+  (real physics + hidden success) since robosuite's runtime is Windows-blocked.
+- **Phase 1 -- Full benchmark + report.** Run the closed-loop task-success benchmark at scale and
+  write a full report. Axes: **model size** (ViT-g vs ViT-L*), **CEM population** (200 vs 400 vs
+  800 samples), planning horizon (T=1 vs T=2), and object/localization metrics (incl. bounding-box
+  based success -- exact metric TBD). Report success rate, planning efficiency, and energy
+  calibration. (*ViT-L has no released AC predictor; a size comparison needs a trained predictor
+  -- see the open question in [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) Section 6.)
+- **Phase 2 -- POV/wrist CNN coarse-to-fine (improvement #1).** Add a CNN backbone for the
+  first-person **wrist** view. V-JEPA plans the coarse approach (third-person); when it stalls, a
+  CNN-based classical image matcher/servo takes over for the fine, close-range motion. Flow:
+  `frame -> encoder -> execute (V-JEPA coarse) -> CNN(wrist frame) -> execute (classical fine)`.
+  This is the coarse-to-fine handoff (the model's predictive energy gates the switch).
+- **Phase 3 -- Third + first view cross-attention (improvement #2, our method).** Third-person
+  view -> frozen encoder -> latent end-state (e.g. `[1, 1024]`); a learned **latent transform**
+  (e.g. `1024 -> 1024`); then **cross-attention (Q,K,V)** with the wrist/POV view in pixel space
+  (patched or raw-pixel); out comes a corrected latent end-state, projected down to an action.
+  Flow: `frame -> encoder -> latent -> latent-transform -> cross-attn(POV) -> corrected latent ->
+  execute`. Exact depth (number of transform / attention layers) is TBD.
+- **Phase 4 -- Unified cross-view latent (final).** Converge the third-person and first-person
+  views into a **single latent space** (no pixel-space cross-attention), so both views inform one
+  representation and planning improves further. Method is open -- requires a literature search.
+
+Downstream application context (self-driving-lab labware insertion) and the confidence-gate thesis
+are unchanged; the phases above develop the coarse controller that the application needs.
+
 ## 1. One paragraph
 
 Self-driving chemistry labs already automate experiment selection, but the robot arm is

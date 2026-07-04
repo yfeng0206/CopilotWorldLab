@@ -1,137 +1,130 @@
 # Architecture
 
-Component-level specification for the Stage-1 pilot. This documents the interfaces that
-are implemented today (the MuJoCo environment) and the interface the world model will
-plug into (the V-JEPA 2-AC wrapper), so the two halves can be developed against a stable
-contract.
+Technical architecture and per-phase data flow for CopilotWorldLab. The design rationale, novelty
+claim and full roadmap are in [`DESIGN.md`](DESIGN.md); the compute budget, checkpoint anatomy and
+fine-tuning plan are in [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md).
 
-## 1. The 7-DoF end-effector interface (the contract)
+> The diagrams below are **Mermaid placeholders**; they will be replaced with rendered image
+> figures later. They render on GitHub as-is.
 
-Everything is organised around a single 7-D end-effector vector, chosen to match V-JEPA
-2-AC's action *layout* (arXiv:2506.09985, Section 3.1):
+## 1. Current control loop (Phase 0/1: V-JEPA 2-AC world model)
+
+Given a third-person RGB frame and a goal image, we encode both with the frozen ViT-g encoder and
+run Cross-Entropy-Method MPC over 7-D end-effector actions to minimise the latent energy toward the
+goal latent, execute, and replan (receding horizon).
+
+```mermaid
+flowchart LR
+    OBS["3rd-person RGB x_k (256x256)"] --> ENC["frozen ViT-g encoder E"]
+    GOAL["goal image x_g"] --> ENC
+    ENC --> ZK["z_k"]
+    ENC --> ZG["z_g (goal latent)"]
+    S["EE state s_k (7-D)"] --> CEM
+    ZK --> CEM["CEM MPC: sample N actions, roll out P(a; z_k, s_k), pick min latent energy to z_g"]
+    ZG --> CEM
+    CEM --> A["action a (xyz + gripper)"]
+    A --> ENV["FrankaDroidEnv: IK to ctrl, step physics"]
+    ENV -->|"receding horizon, re-encode"| OBS
+    ENV --> EVAL["hidden success (privileged sim truth)"]
+```
+
+Energy `E(a) = mean(|P(a; z_k, s_k) - z_g|)` in layer-norm'd latent space is both the planning
+objective and the candidate confidence / hand-off gate.
+
+## 2. Phase roadmap (method evolution)
+
+```mermaid
+flowchart TD
+    P0["Phase 0: setup + reproduce V-JEPA WM (current)"] --> P1["Phase 1: full benchmark + report (ViT-g/L, 200/400/800 samples, T=1/2)"]
+    P1 --> P2["Phase 2: POV/wrist CNN coarse-to-fine"]
+    P2 --> P3["Phase 3: 3rd + POV cross-attention latent (our method)"]
+    P3 --> P4["Phase 4: unified cross-view latent"]
+```
+
+See [`DESIGN.md`](DESIGN.md#0-project-roadmap-phases) for the detailed phase descriptions.
+
+## 3. Phase 2 -- coarse-to-fine (V-JEPA + wrist CNN)
+
+V-JEPA plans the coarse approach from the third-person view; when it stalls (energy plateaus /
+gate fires) a CNN-based classical image matcher/servo on the wrist view takes over the fine motion.
+
+```mermaid
+flowchart LR
+    X["3rd-person frame"] --> WM["V-JEPA WM + CEM (coarse)"] --> STEP["execute coarse action"]
+    STEP --> GATE{"energy gate: close enough?"}
+    GATE -->|"no"| WM
+    GATE -->|"yes, hand off"| CNN["CNN matcher on wrist/POV view (classical fine servo)"]
+    CNN --> FINE["execute fine motion"]
+```
+
+## 4. Phase 3 -- third + first-person cross-attention (our method)
+
+Third-person latent is transformed and cross-attended with the wrist/POV view to produce a
+corrected latent end-state that is projected to an action. Layer counts are TBD.
+
+```mermaid
+flowchart LR
+    X3["3rd-person frame"] --> E3["frozen encoder"] --> Z["latent z (1x1024)"]
+    Z --> T["latent transform (1024 to 1024)"]
+    POV["wrist / POV view (patches or pixels)"] --> CA
+    T --> CA["cross-attention (Q = transform, K,V = POV)"]
+    CA --> ZC["corrected latent"] --> PR["project down"] --> ACT["action, then execute"]
+```
+
+Phase 4 replaces the pixel-space cross-attention with a single unified cross-view latent space
+(method open; requires a literature search -- see [`DESIGN.md`](DESIGN.md#0-project-roadmap-phases)).
+
+## 5. The 7-DoF end-effector interface (the contract)
+
+Everything is organised around a single 7-D end-effector vector matching V-JEPA 2-AC's action
+layout (arXiv:2506.09985, Section 3.1):
 
 ```
 state / action layout:  [ x, y, z, roll, pitch, yaw, gripper ]
                           <-- position -->  <- extrinsic XYZ ->  <- [0,1] -->
 ```
 
-- Position is metres in the world frame.
-- Orientation is extrinsic XYZ Euler angles (radians). See `src/utils/geometry.py` for
-  the Euler <-> quaternion conversions and their unit tests.
-- Gripper is a scalar in `[0, 1]` (0 = open, 1 = closed).
-- An *action* is a delta on this vector between consecutive frames (V-JEPA 2-AC:
-  "the change in end-effector state between frames k and k+1").
+- Position is metres in the world frame; orientation is extrinsic-XYZ Euler (radians); gripper is
+  `[0, 1]` (0 = open, 1 = closed). See `src/utils/geometry.py` and its unit tests.
+- An *action* is the delta on this vector between consecutive frames (~4 fps / 0.25 s cadence).
+- CEM samples xyz + gripper and zeros rotation by default (`maxnorm` per-axis box clip).
 
-### Interface-distribution risks (validate before trusting zero-shot planning)
+**Interface-distribution risk:** matching the layout is necessary but not sufficient -- V-JEPA
+2-AC was trained on real Franka/DROID with a particular camera, cadence and action distribution and
+must infer the action axes from the RGB image. Calibrate frame/sign/scale and the planning camera
+before trusting zero-shot planning (see the camera ablation in
+[`experiments/energy_landscape_and_camera_ablation.md`](experiments/energy_landscape_and_camera_ablation.md)).
 
-Matching the 7-D *layout* is necessary but not sufficient. V-JEPA 2-AC was trained on real
-Franka DROID trajectories with a particular camera viewpoint, action cadence and action
-distribution, and it must infer the action coordinate axis from the monocular RGB image.
-Before interpreting any planning result, calibrate the interface:
+## 6. Components
 
-- **Frame / sign / scale.** Confirm world- vs body-frame deltas, per-axis signs, and
-  translation/rotation scale by scoring known sim transitions `(x_k, s_k, a_gt, x_{k+1})`
-  and checking that `a_gt` sits near the latent-energy minimum; sweep variants otherwise.
-- **Camera.** Prefer a DROID-like third-person view (`scene_cam`) where the workspace axes
-  and gripper motion are visible; treat the downward `wrist_cam` as a later ablation, not
-  the default evidence source.
-- **Cadence.** One action should represent the paper's ~4 fps (~0.25 s) interval, not a
-  single 10 ms sim step; interpolate the mocap motion over the correct number of steps.
-- **Dynamics.** The mocap end-effector is kinematic (no arm, IK, contact or finger
-  articulation), so Stage 1 validates the latent scoring / planning interface in a toy
-  renderer, not real robot-arm manipulation.
-
-## 2. `MujocoPilotEnv` (`src/envs/mujoco_scene.py`)
-
-A thin wrapper over the MJCF scene that exposes exactly what the world model needs. The
-end-effector is a kinematic MuJoCo mocap body, so Stage 1 needs no arm, no IK and no
-actuators; the only dynamic body is the vial.
-
-| Method | Signature | Purpose |
+| Component | Where | Role |
 |---|---|---|
-| `render` | `(camera=None, width=None, height=None) -> uint8[H,W,3]` | RGB observation / goal image from a named camera |
-| `get_ee_state` | `() -> float32[7]` | current 7-D end-effector state |
-| `set_ee_pose` | `(pos=None, euler=None, quat=None, gripper=None)` | absolute pose set |
-| `apply_action` | `(delta[7], step_physics=True, frame="world") -> float32[7]` | apply a 7-D delta, step physics, return new state |
-| `capture_goal_image` | `(pos=None, euler=None, gripper=None, camera=None) -> uint8[H,W,3]` | render at a hypothetical pose, then restore state |
-| `get_observation` | `(camera=None) -> {"image", "ee_state"}` | combined observation |
-| `reset` / `close` | | reset to home pose / release the renderer |
+| `FrankaDroidEnv` | `src/envs/franka_droid_env.py` | DROID-style Franka + Robotiq 2F-85, real IK control + physics; renders the planning camera; `add_object`/`add_zone` graspable cube + place zone; privileged truth accessors (`object_pose/speed/tilt`, `gripper_holds_object`, `object_released`) |
+| Scene builder | `src/envs/franka_build.py` | composes arm + gripper + table + cube/zone via `mjSpec`; `PLANNING_CAMERA` (validated az45_el45 view) |
+| V-JEPA 2-AC world model | vendored `third_party/vjepa2` (loaded namespace-isolated) | frozen ViT-g encoder `E` + 305M action-conditioned predictor `P` |
+| CEM planner | vendored `notebooks/utils/mpc_utils.py::cem` | population MPC to a goal latent; config in [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) |
+| Hidden success | `src/bench/success.py` | reach / touch / grasp-lift / place verdicts on privileged sim state |
+| Task bundles | `src/bench/schema.py` | start/goal images + states + model XML for a benchmark task |
 
-Notes:
-- `render` defaults to 256x256, the resolution V-JEPA 2 expects. A one-off different size
-  spins up a temporary renderer so the cached one keeps the configured size.
-- `capture_goal_image` saves and restores mocap pose + gripper, so goal rendering never
-  perturbs the live state -- this is how goal latents `z_g` will be produced.
-- Orientation deltas compose in the world frame by default (`frame="world"`); body-frame
-  composition is available for wrist-relative motion.
+## 7. Planner config (verified from released code)
 
-### Scene (`assets/mujoco/scene.xml`)
+Meta's released `world_model_wrapper.py` defaults: `rollout` (horizon) **2**, `samples` **400**
+(paper text quotes ~800), `cem_steps` **10**, `topk` **10**, `maxnorm` **0.05 m/axis**, momentum
+0.15; objective mean-L1 in layer-norm'd latent; receding-horizon replan. We only verified the
+released-code default (`rollout=2`); the paper text may report horizon 1 -- we ablate T=1 vs T=2
+rather than claim a single value. Measured timings (RTX 3090, bf16, `--chunk 200`): 100 samples
+4.4 s, 400 samples 16 s, 800 samples 32 s/action.
 
-- A table (top surface at z = 0.22 m).
-- A fixed square holder "well" with an inner opening ~0.04 m across; the vial is 0.024 m
-  in diameter, giving a generous few-millimetre clearance for the initial task (tightened
-  in later tests, matching the proposal's loosened-clearance plan).
-- A free-jointed vial (capped cylinder), the only dynamic body.
-- A mocap end-effector proxy (palm + two finger geoms) carrying a downward `wrist_cam`.
-- A fixed `scene_cam` aimed at the workspace.
+## 8. Hardware envelope
 
-## 3. `VJEPA2ACWorldModel` (`src/world_model/vjepa2_wrapper.py`)
+Windows 11, RTX 3090 (24 GB), 32 GB RAM. Sufficient for ViT-g inference, full-fidelity CEM
+(~800 samples), and predictor fine-tuning with a frozen encoder. Rendering uses the WGL backend
+(EGL/OSMesa are Linux-only). Full memory budget: [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) Section 5.
 
-The control-loop wrapper is still a thin scaffold, but the model now loads and runs: a
-working local-checkpoint loader and CEM-MPC timing harness live in
-`scripts/vjepa2_ac_infer_test.py` (see `docs/setup_stage.md` for the measured timings).
-The wrapper defines the methods the control loop will call:
+## Links
 
-| Method | Purpose | Status |
-|---|---|---|
-| `encode(frames)` | frames -> latent `z` (frozen ViT-g, per-frame 16x16x1408) | in harness |
-| `predict(latent, state, actions)` | action-conditioned rollout `P(a; s, z)` | in harness |
-| `latent_energy(pred, goal)` | `mean(|pred - goal|)` = the gate signal | implemented (pure array op) |
-| `plan_action(obs, goal_image, config)` | CEM MPC to a goal image | in harness (not yet in the env loop) |
-| `load_vjepa2_ac(device, source)` | local-checkpoint loader | wired in the harness; wrapper method still a stub |
-
-Working loading path (implemented in the harness; not `torch.hub`, whose base URL in the
-vendored repo is a localhost stub):
-
-```python
-import torch
-from src.hub.backbones import _make_vjepa2_ac_model, _clean_backbone_key  # vendored repo
-encoder, predictor = _make_vjepa2_ac_model("vit_ac_giant", pretrained=False)
-state = torch.load("checkpoints/vjepa2-ac-vitg.pt", map_location="cpu", weights_only=True)
-encoder.load_state_dict(_clean_backbone_key(state["encoder"]), strict=False)   # RoPE-tolerant
-predictor.load_state_dict(_clean_backbone_key(state["predictor"]), strict=True)
-```
-
-## 4. Planner (`PlannerConfig`)
-
-Cross-Entropy-Method MPC; defaults follow the V-JEPA 2-AC paper (Table 3):
-
-| Field | Default | Source |
-|---|---|---|
-| `samples` (population) | 800 | paper Table 3 |
-| `iterations` | 10 | paper Table 3 |
-| `horizon` | 1 | paper (greedy one-step + receding horizon) |
-| `top_k` | 10 | our default (paper: "top-k", exact k in appendix) |
-
-Additional replication knobs (verified against the reference CEM): each translation axis
-is sampled and clipped independently to `[-0.075, 0.075]` m -- an axis-aligned box (L-inf
-ball), not an L1 ball, so up to ~13 cm Euclidean displacement per action; rotation is
-zeroed and the gripper is sampled. 4 fps action rate, 256x256 input. Reported latency
-~16 s/action on an RTX 4090.
-
-## 5. The confidence gate
-
-The gate consumes `latent_energy(pred, goal)` (Option 1) or ensemble disagreement
-(Option 2) and decides handoff B -> C. Threshold fit on a held-out calibration set to a
-target false-accept rate; below threshold, bounded retry then flag a human. The gate is
-the project's central measurement (ROC AUC vs a simple baseline and vs the visual servo's
-pixel-error convergence). Not implemented yet; the pilot collects the trials that will
-fit and evaluate it.
-
-## 6. Hardware envelope (local)
-
-- Windows 11, RTX 3090 (24 GB, ~23.5 GB free), driver 610.62 / CUDA 13.3, 32 GB RAM.
-- Sufficient for ViT-g inference and CEM planning locally. A single A100-class GPU is
-  needed only for later fine-tuning, not for the off-the-shelf pilot.
-- Rendering uses the WGL/GLFW backend (the only Windows option; EGL/OSMesa are
-  Linux-only) and needs an interactive desktop session.
+- [`DESIGN.md`](DESIGN.md) -- design rationale, roadmap, novelty claim
+- [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) -- compute budget, checkpoint, fine-tune plan
+- [`experiments/`](experiments/) -- reproducible experiments (energy landscape, camera ablation, transition scoring, closed-loop, benchmark plan)
+- [`research_log.md`](research_log.md) -- chronological log + bibliography
+- [`lessons_learned.md`](lessons_learned.md) -- debug traps and invariants

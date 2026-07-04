@@ -50,4 +50,4 @@ results/camera_ablation/
 - [../research_log.md](../research_log.md) — chronological problem/solution log + bibliography
 - [../lessons_learned.md](../lessons_learned.md) — mistakes, fixes, invariants
 - [../vjepa2_ac_architecture.md](../vjepa2_ac_architecture.md) — compute budget + fine-tune plan
-- [../setup_stage.md](../setup_stage.md) — pre-experiment setup record
+- [../../archive/docs/setup_stage.md](../../archive/docs/setup_stage.md) — pre-experiment setup record (archived)

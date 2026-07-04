@@ -35,7 +35,7 @@ closest prior art.
 
 Stage-1 pilot. The pre-experiment setup is complete (environment, DROID-style Franka arm,
 verified V-JEPA 2-AC loading, inference/timing baseline; see
-[`docs/setup_stage.md`](docs/setup_stage.md)). Experiments have now begun, following an
+[`archive/docs/setup_stage.md`](archive/docs/setup_stage.md)). Experiments have now begun, following an
 honest established-benchmark plan ([`docs/experiments/benchmark_plan.md`](docs/experiments/benchmark_plan.md)):
 test vanilla V-JEPA 2-AC on standard tasks first, then measure improvement as deltas on the
 same benchmarks.
