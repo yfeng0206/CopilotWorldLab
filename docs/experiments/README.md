@@ -12,6 +12,7 @@ limits. Style follows the I-JEPA_3D_OCT experiment docs.
 | **Camera-placement ablation** | Which exocentric camera transfers best zero-shot? | az45_el45 best (mean cos **+0.92**); built-in exo_cam worst (-0.16); **improvement +1.08** | [energy_landscape_and_camera_ablation.md](energy_landscape_and_camera_ablation.md#result-2--camera-placement-ablation) |
 | **View-relative frame** | Is a weak camera unusable, or just uncalibrated? | Horizontal frame is view-relative; fitted W* rotation tracks azimuth; most side cameras recover to cos **0.70-0.95** | [energy_landscape_and_camera_ablation.md](energy_landscape_and_camera_ablation.md#result-3--the-horizontal-action-frame-is-view-relative-confound-resolved) |
 | **Transition scoring (benchmark 1)** | Does vanilla V-JEPA 2-AC understand transitions? | True action beats random negatives — rank **1.00** vs shuffled-goal null **0.30**, AUROC 0.953 (DROID example) | [benchmark_plan.md](benchmark_plan.md#1-transition-prediction--action-ranking--implemented-and-run) |
+| **Closed-loop CEM (Phase 1)** | Can V-JEPA 2-AC plan to a goal image in a control loop, and chain sub-goals? | Reach **succeeds** (goal image in 3 steps, 2 cm); 2-goal chain advances sub-goals; lateral sub-goal plateaus at ~3-4 cm (vanilla precision floor) | [cem_closed_loop.md](cem_closed_loop.md) |
 
 Primary finding: **camera angle is the dominant zero-shot knob** — moving from the built-in
 `exo_cam` to an over-the-shoulder az45_el45 view improves action-alignment cosine by +1.08 with
@@ -29,6 +30,7 @@ docs/experiments/
   README.md                                    this index
   benchmark_plan.md                            established-benchmark strategy + metrics + stack
   energy_landscape_and_camera_ablation.md      correctness gate + camera ablation + frame analysis
+  cem_closed_loop.md                           Phase 1: closed-loop CEM planning to goal image(s)
 results/camera_ablation/
   camera_grid.png          the 8 camera angles, annotated with cosine / rotation / verdict
   camera_ranking.png       per-camera mean-cosine bar chart
