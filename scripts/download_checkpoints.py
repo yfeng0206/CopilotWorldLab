@@ -20,6 +20,7 @@ Verified sources (primary):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 import urllib.error
@@ -27,6 +28,8 @@ import urllib.request
 
 AC_URL = "https://dl.fbaipublicfiles.com/vjepa2/vjepa2-ac-vitg.pt"
 AC_EXPECTED_BYTES = 11_760_743_310  # verified size of the released AC checkpoint (~10.95 GiB)
+# SHA256 of the local verified checkpoint; pins content (size only catches truncation).
+AC_EXPECTED_SHA256 = "0b5e3c4bf77a473cd8c61d32fbd87b28cdbba043fb3b8267f3b8bcfb1d5b9e6b"
 ENCODERS = {
     "vitl": "facebook/vjepa2-vitl-fpc64-256",
     "vith": "facebook/vjepa2-vith-fpc64-256",
@@ -42,6 +45,15 @@ def _human(nbytes: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024
     return f"{value:.1f} TB"
+
+
+def _sha256(path: str, chunk: int = 1 << 20) -> str:
+    """Stream a SHA256 of a (multi-GB) file without loading it into memory."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def download_stream(url: str, dest: str, chunk: int = 1 << 20) -> str:
@@ -108,18 +120,20 @@ def main() -> None:
                         help="download the action-conditioned checkpoint (default)")
     parser.add_argument("--no-ac", dest="ac", action="store_false",
                         help="skip the action-conditioned checkpoint")
+    parser.add_argument("--no-hash", action="store_true",
+                        help="skip the (slow) SHA256 content check; size is still verified")
     args = parser.parse_args()
 
     os.makedirs(args.dest, exist_ok=True)
 
     if args.ac:
         dest = os.path.join(args.dest, os.path.basename(AC_URL))
-        if os.path.exists(dest) and os.path.getsize(dest) == AC_EXPECTED_BYTES:
-            print(f"[ac] already present and size-verified: {dest} ({_human(os.path.getsize(dest))})")
+        if os.path.exists(dest) and os.path.getsize(dest) == AC_EXPECTED_BYTES and (
+                args.no_hash or _sha256(dest) == AC_EXPECTED_SHA256):
+            print(f"[ac] already present and verified: {dest} ({_human(os.path.getsize(dest))})")
         else:
             if os.path.exists(dest):
-                print(f"[ac] size mismatch ({_human(os.path.getsize(dest))} != "
-                      f"{_human(AC_EXPECTED_BYTES)}); re-downloading")
+                print(f"[ac] size/hash mismatch; re-downloading {dest}")
             else:
                 print(f"[ac] {AC_URL}")
             download_stream(AC_URL, dest)
@@ -127,7 +141,12 @@ def main() -> None:
             if size != AC_EXPECTED_BYTES:
                 raise IOError(f"[ac] {dest} is {_human(size)}, expected "
                               f"{_human(AC_EXPECTED_BYTES)}; download may be corrupt")
-            print(f"[ac] saved and size-verified {dest} ({_human(size)})")
+            if not args.no_hash:
+                digest = _sha256(dest)
+                if digest != AC_EXPECTED_SHA256:
+                    raise IOError(f"[ac] {dest} SHA256 {digest} != expected "
+                                  f"{AC_EXPECTED_SHA256}; download is corrupt/wrong")
+            print(f"[ac] saved and verified {dest} ({_human(size)})")
 
     if args.encoder != "none":
         download_encoder(ENCODERS[args.encoder], args.dest)
