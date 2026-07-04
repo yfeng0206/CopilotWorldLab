@@ -50,16 +50,16 @@ all negatives (rank 1.00), but scored against a *mismatched* (shuffled) goal the
 not favored (null 0.30). So this is genuine image-goal-conditioned transition understanding,
 not a fixed action prior.
 
-Per-camera on our MuJoCo renders (tracks the camera-placement ablation exactly; the primary
-sim result is per-camera because a cross-camera aggregate blends the calibrated and
-uncalibrated view-relative interfaces):
+Per-camera on our MuJoCo renders (n=18 each; tracks the camera-placement ablation exactly).
+The primary sim result is per-camera because a cross-camera aggregate (rank 0.75, null 0.55)
+blends the calibrated and uncalibrated view-relative interfaces:
 
-| camera | rank_frac | | camera | rank_frac |
-|---|---|---|---|---|
-| az45_el45 (planning cam) | **~0.96** | | az135_el20 | ~0.67 |
-| az45_el20 | ~0.94 | | az135_el45 | ~0.66 |
-| az90_el20 | ~0.85 | | top_down | ~0.62 |
-| az90_el45 | ~0.85 | | exo_named (built-in) | **~0.48** (chance) |
+| camera | rank_frac | null | | camera | rank_frac | null |
+|---|---|---|---|---|---|---|
+| az45_el45 (planning cam) | **0.958** | 0.670 | | az135_el20 | 0.672 | 0.450 |
+| az45_el20 | 0.944 | 0.616 | | az135_el45 | 0.655 | 0.488 |
+| az90_el20 | 0.854 | 0.616 | | top_down | 0.615 | 0.533 |
+| az90_el45 | 0.849 | 0.589 | | exo_named (built-in) | **0.476** | 0.408 |
 
 Reading: on DROID-native transitions the vanilla model clearly understands the dynamics
 (true action beats all 32 negatives, and the null control confirms it uses the goal). Zero-shot
