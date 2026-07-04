@@ -149,6 +149,7 @@ def main() -> None:
     step_csv = clog.CSVLogger(
         os.path.join("logs", f"cem_loop_{args.task}_{stamp}.csv"),
         "subgoal", "step", "energy", "dist_to_goal_m", "dx", "dy", "dz", "dgrip",
+        "rdx", "rdy", "rdz", "track_err_m", "ik_pos_err", "action_ok",
         "ee_x", "ee_y", "ee_z", "cem_time_s", "reached",
     )
 
@@ -161,11 +162,15 @@ def main() -> None:
     home_pos = env.get_ee_state()[:3].copy()
 
     # Build the goal-image sequence: teleport-preview the arm at each sub-goal pose and render.
+    # Encode goals under the same no_grad/autocast path as the observations so their latents
+    # are directly comparable (audit: z_goal and z_ctx must use the same dtype path).
     goals = []
     for delta in TASKS[args.task]:
         goal_pos = home_pos + np.asarray(delta[:3])
         goal_img = env.capture_goal_image(pos=goal_pos, euler=[np.pi, 0, 0], camera="planning")
-        z_goal = encode(encoder, goal_img, device, tokens_per_frame)
+        with torch.no_grad(), torch.autocast(dev.type, dtype=autocast_dtype,
+                                             enabled=autocast_dtype is not None):
+            z_goal = encode(encoder, goal_img, device, tokens_per_frame).detach()
         goals.append({"pos": goal_pos, "z_goal": z_goal, "img": goal_img})
     logger.info("built %d sub-goal image(s) for task '%s'", len(goals), args.task)
     env.reset()  # start the episode from home
@@ -189,9 +194,11 @@ def main() -> None:
     def plan(z_ctx, s_ctx, z_goal):
         with torch.no_grad(), torch.autocast(dev.type, dtype=autocast_dtype,
                                              enabled=autocast_dtype is not None):
+            # Freeze the gripper (axis 3 of the sampled xyz+gripper action) for reach tasks so
+            # CEM does not spend samples on -- or the loop apply -- spurious gripper motion.
             return cem(context_frame=z_ctx, context_pose=s_ctx, goal_frame=z_goal,
                        world_model=step_predictor, rollout=args.rollout, samples=args.samples,
-                       cem_steps=args.cem_steps, topk=10, maxnorm=args.maxnorm,
+                       cem_steps=args.cem_steps, topk=10, maxnorm=args.maxnorm, axis={3: 0.0},
                        momentum_mean=0.15, momentum_std=0.75,
                        momentum_mean_gripper=0.15, momentum_std_gripper=0.15)
 
@@ -203,9 +210,14 @@ def main() -> None:
         logger.info("--- sub-goal %d/%d, target EE xyz=(%.3f,%.3f,%.3f) ---",
                     gi + 1, len(goals), *g["pos"])
         reached = False
+        dist = float(np.linalg.norm(env.get_ee_state()[:3] - g["pos"]))
         for step in range(args.max_steps):
             state = env.get_ee_state()
             dist = float(np.linalg.norm(state[:3] - g["pos"]))
+            if dist <= args.pos_tol:  # check BEFORE planning so post-action success is caught
+                reached = True
+                logger.info("  g%d step %2d | dist=%.3f m | REACHED (pre-plan)", gi, step, dist)
+                break
             obs = env.render(camera="planning")
             with torch.no_grad(), torch.autocast(dev.type, dtype=autocast_dtype,
                                                  enabled=autocast_dtype is not None):
@@ -214,19 +226,28 @@ def main() -> None:
             s_ctx = torch.tensor(state, dtype=torch.float32).view(1, 1, 7).to(device)
             t0 = time.perf_counter()
             action = plan(z_ctx, s_ctx, z_goal)[0, 0].float().cpu().numpy()
+            action[6] = 0.0  # enforce gripper freeze for reach tasks
             cem_time = time.perf_counter() - t0
 
-            reached = dist <= args.pos_tol
+            # Apply, then measure the REALIZED delta vs the commanded action. The model was
+            # trained on realized pose deltas, so a large commanded-vs-realized tracking error
+            # (not the model) could cause near-goal drift -- log it to tell them apart.
+            next_state = env.apply_action(action)
+            realized = next_state[:3] - state[:3]
+            track_err = float(np.linalg.norm(realized - action[:3]))
             step_csv.log(gi, step, round(energy, 5), round(dist, 4),
                          *[round(float(a), 4) for a in (action[0], action[1], action[2], action[6])],
+                         *[round(float(r), 4) for r in realized], round(track_err, 4),
+                         round(env.last_ik_pos_err, 4), int(env.last_action_ok),
                          *[round(float(p), 4) for p in state[:3]], round(cem_time, 3), int(reached))
-            logger.info("  g%d step %2d | energy=%.4f | dist=%.3f m | a=(%+.3f,%+.3f,%+.3f) | %.1fs%s",
-                        gi, step, energy, dist, action[0], action[1], action[2], cem_time,
-                        "  REACHED" if reached else "")
-            if reached:
-                break
-            env.apply_action(action)
+            logger.info("  g%d step %2d | energy=%.4f | dist=%.3f | a=(%+.3f,%+.3f,%+.3f) "
+                        "realized=(%+.3f,%+.3f,%+.3f) track_err=%.3f | %.1fs",
+                        gi, step, energy, dist, action[0], action[1], action[2],
+                        realized[0], realized[1], realized[2], track_err, cem_time)
 
+        if not reached:
+            dist = float(np.linalg.norm(env.get_ee_state()[:3] - g["pos"]))
+            reached = dist <= args.pos_tol
         if reached:
             total_reached += 1
         else:
