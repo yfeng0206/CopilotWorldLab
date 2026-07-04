@@ -51,3 +51,4 @@ _tmp_*
 
 # MuJoCo runtime log
 MUJOCO_LOG.TXT
+tasks/
