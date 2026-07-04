@@ -2,17 +2,21 @@
 
 **Question.** Does the vanilla (unmodified) V-JEPA 2-AC model actually *understand real robot
 transitions* — i.e., does it score the executed action lower in latent energy than random
-alternatives, and does that ranking depend on the goal image? This is the first honest,
-established-benchmark baseline in the project's evaluation plan
-([benchmark_plan.md](benchmark_plan.md)); the fine-tuned predictor will be measured against the
-same numbers.
+alternatives, and does that ranking depend on the goal image? This is a **world-model transition
+sanity benchmark** (benchmark 1 in the project's evaluation plan,
+[benchmark_plan.md](benchmark_plan.md)), the first honest baseline the fine-tuned predictor will
+be measured against on the same protocol. It is **not** a grasp/place *task*-success benchmark:
+the extracted transitions carry no task-completion labels, so it does not replace robomimic
+Lift/Can/Square for measuring task success.
 
-**Why DROID.** The intended established grasp/place source was robomimic (Lift/Can/Square), but
-robomimic does not host pre-rendered image datasets — only `low_dim` (no images) and `raw` (sim
-states needing a robosuite render, which is blocked on Windows, lessons_learned #11/#18/#19). The
-Windows-runnable established alternative is **DROID itself**, the real-robot dataset V-JEPA 2-AC
-was trained and evaluated on (arXiv:2506.09985; DROID arXiv:2403.12945). This is the fairest
-"does it understand real transitions?" test rather than a self-made easy dataset.
+**Why DROID.** The intended grasp/place *task* source is robomimic (Lift/Can/Square). robomimic
+does not host pre-rendered image datasets (HF ships only `low_dim` + `raw`), and the robosuite
+*env runtime* does not step on this Windows setup (lessons_learned #11) — but robomimic raw
+states **can** be re-rendered on Windows with direct MuJoCo + patched robosuite assets, so those
+task sources remain available when success labels are needed. For a real-robot *transition*
+sanity check, DROID is the natural source: it is the exact dataset V-JEPA 2-AC was trained and
+evaluated on (arXiv:2506.09985; DROID arXiv:2403.12945), it is Windows-runnable, and it avoids a
+self-made easy dataset.
 
 ## Method
 
@@ -21,11 +25,17 @@ was trained and evaluated on (arXiv:2506.09985; DROID arXiv:2403.12945). This is
   [`scripts/extract_droid_transitions.py`](../../scripts/extract_droid_transitions.py) decodes
   the video, reads per-frame 7-D EE state `[x, y, z, roll, pitch, yaw, gripper]`, and emits one
   npz per transition: `(image_t, state_t) -> (image_{t+H}, state_{t+H})`, `H = 5` frames (~0.33 s
-  at 15 fps). Transitions with < 2 cm xyz motion are dropped. **n = 300** transitions from the
-  first 20 episodes (15 per episode).
+  at 15 fps). Transitions with < 2 cm xyz motion are dropped. Frame/state alignment is validated
+  per episode (contiguous `frame_index`; decoded frame PTS matches the parquet `timestamp` within
+  < 0.5 frame — observed max 0.00), and a provenance manifest (dataset revision SHA, seed, stride,
+  camera, per-episode counts) is written to
+  [`results/benchmarks/droid_extraction_manifest.json`](../../results/benchmarks/droid_extraction_manifest.json).
+  **n = 300** transitions from the first 20 episodes (15 per episode).
 - **Score.** For each transition the true action's xyz translation (recovered from the state
   delta, rotation/gripper zeroed) is compared against **K = 32** random negative directions of
-  the same magnitude. Latent energy `E(a) = mean(|P(a; z_ctx, s_ctx) - z_goal|)`. Primary metric
+  the same magnitude (a *random-direction* ranking; hard negatives — real other-action directions
+  and small angular perturbations — are future work). Latent energy
+  `E(a) = mean(|P(a; z_ctx, s_ctx) - z_goal|)`. Primary metric
   is the within-transition `rank_frac` (fraction of negatives with higher energy than the true
   action; chance 0.5). [`scripts/benchmark_transition_scoring.py`](../../scripts/benchmark_transition_scoring.py).
 - **Null control (image-conditioning).** The identical test is rescored with the goal latent
@@ -53,17 +63,23 @@ Source CSV: [`results/benchmarks/droid_transition_scoring.csv`](../../results/be
 
 ## Reading
 
-- **Supported:** vanilla V-JEPA 2-AC is genuinely image-goal-conditioned on real robot data. The
-  true executed action is favored over random negatives (0.820) far above the different-episode
-  null (0.486); the +0.334 gap cannot come from a fixed action prior, since the prior would score
+- **Supported (evidence, narrowly bounded):** vanilla V-JEPA 2-AC has a strong goal-sensitive
+  local action-ranking signal on real robot data. The true executed action is favored over random
+  same-magnitude negatives (0.820) far above the different-episode null (0.486); the +0.334 gap
+  is evidence the ranking depends on the goal image, since a fixed action prior would score
   identically regardless of goal. The left panel shows most transitions piling up near
   `rank_frac = 1.0`.
-- **Honest limits:** this is a *one-step scoring* benchmark, not closed-loop planning success.
-  It is harder than the curated paper example (rank 1.00, n=2) because DROID's exterior camera is
-  randomized per scene and the 5-frame horizon is short; `top1 = 0.320` and pooled `AUROC = 0.612`
-  reflect that per-scene energy is not globally calibrated. Actions are xyz-translation only
-  (rotation/gripper zeroed). The absolute number depends on `H`, `min_motion`, camera choice, and
-  K; those are fixed and reported so the fine-tuned delta is measured on the same protocol.
+- **Honest limits:** (1) this is a *one-step scoring* benchmark, not closed-loop planning success,
+  and carries no task-completion labels — it does not measure grasp/place success. (2) Negatives
+  are *random* directions, so this is direction sensitivity against easy negatives, not hard-
+  negative or full transition understanding. (3) The different-episode null is a *foreign-scene*
+  control: it shows "true future goal vs a different-scene goal", not same-scene goal
+  disambiguation. (4) It is harder than the curated paper example (rank 1.00, n=2) because DROID's
+  exterior camera is randomized per scene and the 5-frame horizon is short; `top1 = 0.320` and
+  pooled `AUROC = 0.612` reflect that per-scene energy is not globally calibrated. Actions are
+  xyz-translation only. The protocol (n, H, K, seed, camera) is fixed and recorded in
+  [`droid_transition_scoring_summary.json`](../../results/benchmarks/droid_transition_scoring_summary.json)
+  so the fine-tuned delta is measured identically.
 
 ## What improvement will look like
 
@@ -85,5 +101,6 @@ python scripts/plot_transition_benchmark.py --title "V-JEPA 2-AC transition scor
 - V-JEPA 2 / V-JEPA 2-AC — arXiv:2506.09985
 - DROID — arXiv:2403.12945; dataset `lerobot/droid_100`
 - [benchmark_plan.md](benchmark_plan.md) — the full evaluation strategy and metric table
-- [../lessons_learned.md](../lessons_learned.md) — #11/#18/#19 (why robomimic/robosuite/ManiSkill
-  images are blocked on Windows and DROID is used instead)
+- [../lessons_learned.md](../lessons_learned.md) — #11/#18/#19 (robosuite/ManiSkill env runtimes
+  are blocked on Windows; robomimic hosts no image datasets but raw states re-render on Windows;
+  DROID used for the real-robot transition sanity check)

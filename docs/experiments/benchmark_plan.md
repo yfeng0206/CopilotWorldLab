@@ -49,14 +49,15 @@ higher energy than the true action; chance 0.5) as the primary metric, plus `top
 The **null control** is the key honesty check: with the *correct* goal the true action is
 favored (rank 0.820 on 300 real transitions), but scored against a goal from a *different
 episode* the same action drops to chance (null 0.486). The **+0.334 gap is evidence that vanilla
-V-JEPA 2-AC is image-goal-conditioned on real robot data**, not running a fixed action prior.
-The real-DROID batch (300 transitions from 20 `lerobot/droid_100` episodes via
+V-JEPA 2-AC's action ranking depends on the goal image** on real robot data, not a fixed action
+prior (bounded: this is a foreign-scene control against random-direction negatives, not same-scene
+disambiguation or hard negatives). The real-DROID batch (300 transitions from 20
+`lerobot/droid_100` episodes via
 [`scripts/extract_droid_transitions.py`](../../scripts/extract_droid_transitions.py); figure
 [`results/benchmarks/droid_transition_scoring.png`](../../results/benchmarks/droid_transition_scoring.png))
-is the **established-benchmark baseline our fine-tuned predictor must beat** — it is harder and
-more honest than the single curated example (whose randomized exterior camera and short 5-frame
-horizon make it a realistic in-the-wild test). Actions are xyz-translation only (rotation/gripper
-zeroed). Full writeup: [transition_scoring.md](transition_scoring.md).
+is the **world-model transition baseline our fine-tuned predictor must beat** — a real-robot
+sanity check, not a grasp/place task-success benchmark (no completion labels). Actions are
+xyz-translation only. Full writeup: [transition_scoring.md](transition_scoring.md).
 
 Per-camera on our MuJoCo renders (n=18 each; tracks the camera-placement ablation exactly).
 The primary sim result is per-camera because a cross-camera aggregate (rank 0.75, null 0.55)
@@ -99,17 +100,19 @@ loop -> step the env -> official success. Two options: (a) run ManiSkill under W
 (b) treat the working MuJoCo `FrankaDroidEnv` as the closed-loop platform and add proper
 pick/place tasks with success labels there (needs the graspable-object scene).
 
-### 3. robomimic / LIBERO — image datasets blocked on Windows
+### 3. robomimic / LIBERO — grasp/place task sources (raw-state replay on Windows)
 
-Established imitation-learning demos (Lift, Can, Square, Transport) were the intended
-grasp/place transition-scoring source. Verified 2026-07-04: robomimic (v0.5) hosts only
-`low_dim` (proprioception + actions, **no images**) and `raw` (sim states) datasets on Hugging
-Face; the pre-rendered `image` hdf5 links are `None` and must be rendered locally via robosuite
-— which does not run on Windows (lessons_learned #11). The older Stanford-hosted `image.hdf5`
-URLs are unreachable. So robomimic image transition scoring is **gated on a Linux/WSL2 robosuite
-render**. We use **real DROID** (benchmark 1 above) as the Windows-runnable established grasp/
-place transition source instead; it is also V-JEPA 2-AC's own training domain. Revisit robomimic
-if a Linux render pass is set up.
+Established imitation-learning demos (Lift, Can, Square, Transport) are the grasp/place *task*
+sources (with success labels), complementary to the DROID transition sanity check in (1).
+Verified 2026-07-04: robomimic (v0.5) does **not** host pre-rendered `image` HDF5 — HF ships only
+`low_dim` (proprioception + actions, no images) and `raw` (sim states); the older Stanford
+`image.hdf5` URLs are unreachable. And the robosuite **env runtime** does not step on this Windows
+setup (mujoco 3.10 `mj_fullM`, lessons_learned #11). **However**, robomimic `raw` states *can* be
+re-rendered on Windows with direct MuJoCo + patched robosuite assets (read `demo_v15.hdf5`, use
+each demo's embedded `model_file`, set qpos from the saved states, and render — no dynamics
+stepping). This produces image trajectories with actions and (from the demos) task-success labels.
+So Lift/Can/Square remain viable grasp/place task benchmarks on Windows via replay rendering;
+closed-loop *rollout* success on robosuite/ManiSkill still needs Linux/WSL2.
 
 ### 4. Custom labware env — last (application demo, not the first benchmark)
 

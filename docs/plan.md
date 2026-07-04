@@ -28,8 +28,9 @@ null **0.486** (+0.334 image-conditioning effect), top1 0.320, gap_z +1.45
 (`docs/experiments/transition_scoring.md`); and **Phase 1 closed-loop CEM** to a goal image
 (`docs/experiments/cem_closed_loop.md`) -- reach succeeds (goal image in 3 steps), multi-goal
 chaining works, and the ~3 cm precision floor is diagnosed as a model/interface limit (tracking
-error only 9 mm), motivating W* + fine-tuning. robomimic/robosuite/ManiSkill image benchmarks are
-Windows-blocked (lessons #11/#18/#19), so DROID is the established grasp/place source. The plan is
+error only 9 mm), motivating W* + fine-tuning. robosuite/ManiSkill closed-loop *rollout* is
+Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows for grasp/place
+*task* sources (#11/#19); DROID gives the real-robot *transition* baseline. The plan is
 benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
 1. **W* calibration + re-run Phase 1.** Fit/freeze the App. B.4 horizontal rotation for the

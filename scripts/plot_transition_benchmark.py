@@ -39,6 +39,8 @@ def main() -> None:
     parser.add_argument("--csv", default="results/benchmarks/droid_transition_scoring.csv")
     parser.add_argument("--title", default="V-JEPA 2-AC transition scoring -- DROID")
     parser.add_argument("--out", default="results/benchmarks/droid_transition_scoring")
+    parser.add_argument("--negatives", type=int, default=32,
+                        help="K negatives per transition (for the table text; must match the run)")
     args = parser.parse_args()
 
     d = load(args.csv)
@@ -74,7 +76,7 @@ def main() -> None:
         "| metric | value | meaning |\n"
         "| --- | --- | --- |\n"
         f"| transitions (n) | {n} | real DROID (image_t, state_t) -> (image_t+H) pairs |\n"
-        f"| rank_frac | {rank_m:.3f} | mean fraction of {32} random negatives the true xyz action beats (chance 0.5) |\n"
+        f"| rank_frac | {rank_m:.3f} | mean fraction of {args.negatives} random negatives the true xyz action beats (chance 0.5) |\n"
         f"| null rank_frac | {null_m:.3f} | same, but goal from a different episode (image-conditioning control) |\n"
         f"| conditioning gap | {rank_m - null_m:+.3f} | rank_frac - null; the goal-image effect |\n"
         f"| top1_acc | {top1_m:.3f} | fraction of transitions where the true action beats ALL negatives |\n"

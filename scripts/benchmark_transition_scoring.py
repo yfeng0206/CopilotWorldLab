@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 from datetime import datetime
@@ -316,6 +317,32 @@ def main() -> None:
             ns = [r["null_rank_frac"] for r in results if r["camera"] == cam]
             logger.info("  %-12s rank_frac=%.3f null=%.3f (n=%d)",
                         cam, float(np.mean(rs)), float(np.mean(ns)), len(rs))
+
+    # Summary JSON with the full headline (incl. auroc_pool, which is not derivable from the
+    # per-transition CSV) plus run metadata, for exact-number reproducibility.
+    ckpt_sha = ""
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        with open(CHECKPOINT, "rb") as fh:
+            for blk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(blk)
+        ckpt_sha = h.hexdigest()
+    except Exception:
+        pass
+    summary = {
+        "n": len(results), "negatives_K": args.negatives, "seed": args.seed,
+        "dtype": args.dtype, "device": device, "scope": scope, "cameras": cams,
+        "rank_frac": round(rank, 4), "null_rank_frac": round(null, 4),
+        "conditioning_gap": round(rank - null, 4), "top1_acc": round(top1, 4),
+        "gap_z": round(gap, 4), "auroc_pool": round(au, 4),
+        "null_control": "goal drawn from a different group (episode/camera)",
+        "negatives": "random same-magnitude xyz directions (rotation/gripper zeroed)",
+        "checkpoint_sha256": ckpt_sha,
+        "traj_glob": args.traj if args.traj else "vendored DROID example (fwd+rev)",
+    }
+    with open(os.path.join("logs", f"benchmark_transition_{stamp}.json"), "w") as fh:
+        json.dump(summary, fh, indent=2)
     logger.info("done")
 
 

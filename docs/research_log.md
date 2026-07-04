@@ -34,9 +34,15 @@ camera (PyAV), reads 7-D EE state `[x,y,z,roll,pitch,yaw,gripper]`, and emits tr
 control: the mismatched goal must come from a DIFFERENT episode (a same-episode neighbour inflates
 the null to 0.74); `build_null_indices()` now draws a random different-group goal.
 **Outcome**: n=300 real DROID transitions -> **rank_frac 0.820 vs different-episode null 0.486**
-(+0.334 image-conditioning effect), top1 0.320, gap_z +1.45, AUROC 0.612. This is the honest
-established-benchmark baseline the fine-tuned predictor must beat. Figure + table + CSV committed
-under `results/benchmarks/`. Writeup: `docs/experiments/transition_scoring.md`.
+(+0.334 goal-image effect; bounded: foreign-scene control, random-direction negatives), top1
+0.320, gap_z +1.45, AUROC 0.612. A world-model transition sanity baseline (NOT a grasp/place
+task-success benchmark) the fine-tuned predictor must beat. Figure + table + CSV + summary JSON +
+extraction manifest committed under `results/benchmarks/`. Writeup:
+`docs/experiments/transition_scoring.md`.
+**Correction (from audit)**: robomimic is not fully Windows-blocked -- pre-rendered image HDF5 is
+not hosted and robosuite *rollout* fails, but robomimic raw states re-render on Windows via direct
+MuJoCo + patched assets (Lift verified: `outputs/robomimic_lift_demo0/`), so Lift/Can/Square remain
+grasp/place task sources. robosuite was reinstalled for this. Docs corrected accordingly.
 
 #### 15. Transition-scoring benchmark (vanilla baseline) + benchmark plan
 **Context**: Shift from "does it look better" to honest evaluation on established benchmarks.

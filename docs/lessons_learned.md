@@ -93,11 +93,14 @@ not sneak back in.
   1.5.2 is the latest release and still calls the old 2-arg `mj_fullM`; mujoco 3.10 requires
   `mj_fullM(model, data, dst)`.
 - **Rule**: robosuite needs an older mujoco (~3.2.x). Our stack pins mujoco 3.10 for
-  `FrankaDroidEnv` (the mjSpec composition API), so downgrading is not an option. Decision:
-  do NOT adopt robosuite in the main env; if a standard third-party benchmark is ever needed,
-  create a SEPARATE venv pinned to a compatible mujoco. It is not required for this project --
-  robosuite is not what V-JEPA 2-AC uses (real Franka/DROID hardware), and `FrankaDroidEnv`
-  already reproduces that hardware faithfully.
+  `FrankaDroidEnv` (the mjSpec composition API), so downgrading is not an option. The
+  incompatibility is in the **dynamics/stepping** path — so robosuite `env.reset()/step()`
+  (closed-loop rollout) does not run. **But raw-state RENDERING works on Windows**: read a
+  robomimic `raw` demo, use its embedded `model_file`, set `qpos` from the saved states, and
+  render with MuJoCo directly (no `mj_fullM`, no dynamics). That is enough to replay
+  Lift/Can/Square as image trajectories with actions + success labels. Rule: do not rely on
+  robosuite *runtime* in the main env; use raw-state replay for datasets, and a SEPARATE
+  mujoco-pinned venv only if closed-loop robosuite/ManiSkill rollout is ever needed.
 
 ### 12. Differential IK returns a stale residual unless recomputed after the loop
 - **What happens**: The residual is computed at the top of each iteration, before the last
@@ -178,17 +181,20 @@ not sneak back in.
   The V-JEPA scoring/planning code is backend-agnostic, so only the env adapter changes.
 
 ### 19. Windows benchmark strategy: offline datasets first, then FrankaDroidEnv (cleanup)
-- **What happens**: both standard sim runtimes fail on Windows -- robosuite (mujoco 3.10
-  `mj_fullM`, #11) and ManiSkill/SAPIEN (Pinocchio + segfault, #18). Both were removed:
-  robosuite uninstalled from the main venv (nothing in our code imports it; 31 tests still
-  pass), and the ManiSkill probe venv deleted.
+- **What happens**: both standard sim *runtimes* fail on Windows -- robosuite (mujoco 3.10
+  `mj_fullM`, #11) and ManiSkill/SAPIEN (Pinocchio + segfault, #18). The ManiSkill probe venv
+  was deleted. robosuite was briefly uninstalled, then **reinstalled** in the main venv because
+  its *raw-state rendering* (no dynamics stepping) works on Windows and is needed to replay
+  robomimic demos (#11). Correction to an earlier note: robosuite is present again; only its
+  closed-loop rollout is blocked. The env is gitignored, so `git` stays clean either way.
 - **Rule (the Windows-friendly benchmark path)**:
-  1. **Established grasp/place transition scoring from OFFLINE datasets** -- use robomimic
-     demonstration datasets (Lift, Can, Square, Transport), which ship image observations +
-     actions, so `benchmark_transition_scoring.py`-style scoring runs with NO sim runtime.
-     Metric: does V-JEPA 2-AC score the true action lower than random negatives on real
-     grasp/place transitions?
-  2. **Closed-loop control on `FrankaDroidEnv`** (MuJoCo, works on Windows): reach to object,
-     close gripper, lift, move to goal, open -- our own simple pick/place loop.
-  Only move to robosuite/ManiSkill sim (WSL2/Linux) if closed-loop success on an official
-  suite is required. Do not spend time fighting their Windows runtimes.
+  1. **Real-robot transition sanity (benchmark 1)** -- `scripts/extract_droid_transitions.py`
+     downloads `lerobot/droid_100` (real DROID; images + 7-D EE state) and
+     `benchmark_transition_scoring.py` scores true vs random-negative actions by latent energy.
+     This is a world-model transition check, NOT a task-success benchmark.
+  2. **Grasp/place TASK sources** -- robomimic Lift/Can/Square via raw-state replay rendering
+     (direct MuJoCo + patched assets, #11); these carry task-success labels.
+  3. **Closed-loop control on `FrankaDroidEnv`** (MuJoCo, works on Windows): reach, close gripper,
+     lift, move to goal, open -- our own simple pick/place loop.
+  Only move to robosuite/ManiSkill *rollout* (WSL2/Linux) if closed-loop success on an official
+  suite is required. Do not fight their Windows runtimes.
