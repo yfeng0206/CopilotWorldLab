@@ -163,3 +163,16 @@ not sneak back in.
   `max_translation` (0.13 m) -- a different constraint shape.
 - **Rule**: describe the CEM bound as a box, not an L1 ball, and reconcile the box (CEM) vs.
   L2 (env) translation limits during interface calibration before any zero-shot transfer.
+
+### 18. ManiSkill (SAPIEN) does not run on this Windows setup
+- **What happens**: `mani-skill` 3.0.1 + `sapien` 3.0.3 install fine in a separate venv, but
+  `PickCube-v1` fails: the `pd_ee_delta_pose` (end-effector) control mode raises
+  `TypeError: 'NoneType' object is not callable` because `PinocchioModel` is `None` (Pinocchio,
+  the IK backend, has no Windows wheel), and even the `pd_joint_delta_pos` control mode crashes
+  the process with an access violation (exit `0xC0000005`) inside the SAPIEN native sim.
+- **Why**: SAPIEN's GPU/physx simulator and the Pinocchio IK dependency are Linux-oriented; the
+  Windows path is not reliable. Same class of blocker as robosuite (#11).
+- **Rule**: the two standard sim manipulation suites (robosuite, ManiSkill) both require
+  Linux / WSL2 for the closed-loop success benchmark. On Windows, use the MuJoCo
+  `FrankaDroidEnv` (which works) as the closed-loop platform, or move ManiSkill to WSL2/Linux.
+  The V-JEPA scoring/planning code is backend-agnostic, so only the env adapter changes.

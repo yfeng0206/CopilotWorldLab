@@ -81,12 +81,16 @@ PlugCharger/insertion. Metrics: zero-shot success rate, success after predictor 
 CEM time/samples, and energy-vs-success ROC-AUC. Answers: does V-JEPA 2-AC transfer to standard
 simulated manipulation, and does our method raise success / calibration?
 
-Status/compat: `mani-skill` 3.0.1 and `sapien` 3.0.3 are on PyPI. SAPIEN is a separate physics
-backend from our MuJoCo stack; like robosuite (which is incompatible with our pinned mujoco 3.10,
-lessons_learned #11), it should be installed in a **separate venv** to avoid disturbing the
-working torch/mujoco environment. The world-model scoring code is backend-agnostic (it consumes
-rendered frames + 7-D end-effector deltas), so only a thin ManiSkill adapter is needed:
-render observation -> V-JEPA latent -> CEM plan -> step the ManiSkill env -> official success.
+Status/compat: `mani-skill` 3.0.1 and `sapien` 3.0.3 install, but **do not run on this Windows
+setup** (verified 2026-07-04, separate venv): the end-effector control mode needs Pinocchio
+(no Windows wheel -> `PinocchioModel is None`), and even joint control crashes the SAPIEN
+native sim with an access violation. Like robosuite (lessons_learned #11), ManiSkill requires
+**Linux / WSL2**. So the established-suite closed-loop benchmark is gated on a Linux
+environment. Because the V-JEPA scoring/planning code is backend-agnostic (frames + 7-D EE
+deltas), only a thin adapter changes: render observation -> V-JEPA latent -> the Phase-1 CEM
+loop -> step the env -> official success. Two options: (a) run ManiSkill under WSL2/Linux, or
+(b) treat the working MuJoCo `FrankaDroidEnv` as the closed-loop platform and add proper
+pick/place tasks with success labels there (needs the graspable-object scene).
 
 ### 3. robomimic / LIBERO — only if needed
 
