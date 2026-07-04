@@ -13,6 +13,32 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-04 -- Benchmark pivot: honest established-benchmark evaluation
+
+#### 15. Transition-scoring benchmark (vanilla baseline) + benchmark plan
+**Context**: Shift from "does it look better" to honest evaluation on established benchmarks.
+Test vanilla V-JEPA 2-AC first, define improvement as deltas on the same benchmarks after
+fine-tuning. Wrote `docs/experiments/benchmark_plan.md` (metrics table; tiered stack: 1
+transition scoring, 2 ManiSkill, 3 robomimic/LIBERO, 4 custom labware last; 5-step loop).
+**Benchmark 1 (implemented + run)**: `scripts/benchmark_transition_scoring.py` scores the
+latent energy of the TRUE action vs K=32 random same-magnitude negatives per transition.
+Primary metric = within-transition rank_frac; adds a shuffled-goal NULL control.
+**Result (vanilla, bf16)**: DROID example rank_frac=1.00, null=0.30, AUROC 0.953 -- the true
+action beats all negatives toward the correct goal but NOT a shuffled goal, so this is genuine
+image-goal-conditioned understanding, not an action prior. MuJoCo per-camera tracks the camera
+ablation: az45_el45 0.958 (null 0.670), exo_named 0.476 (null 0.408); aggregate 0.75.
+**Audit** (rubber-duck gpt-5.5 xhigh): no code bugs (scoring matches the audited sibling,
+AUROC math correct). Applied: within-transition rank_frac as primary (pooled AUROC relabeled),
+per-camera as the primary sim result (aggregate labeled "uncalibrated mixed-camera"), the
+shuffled-goal null control (addresses "is it just a prior?"), and a zero-motion guard.
+**Also (audit fixes)**: wired `PLANNING_CAMERA` as the `FrankaDroidEnv` default (was the worst
+exo_cam) with an integration test; SHA256 checkpoint pin; fixed stale status docs (README/plan)
+and softened the research-log vertical-z / recovery-range claims; bounded the experiment-doc
+wording to one-step alignment. 31 tests pass.
+**Infra note**: the workspace is periodically reset to HEAD (untracked files wiped, tracked
+edits reverted); commit early and often. Cost two rebuilds of the benchmark script.
+**References**: user's benchmark stack; arXiv:2506.09985; `scripts/benchmark_transition_scoring.py`.
+
 ### 2026-07-04 -- Camera-ablation writeup in OCT-JEPA format
 
 #### 14. Camera-ablation experiment doc: combined + per-angle tables, figures
