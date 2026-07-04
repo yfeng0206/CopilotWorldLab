@@ -366,31 +366,38 @@ def task_reach(env, ctx, tlog, args):
     return res
 
 
-def _grasp_goal(env):
+def _grasp_hover(env, dz=0.10):
+    """Pre-grasp hover pose above the cube -- the V-JEPA reach target (so it does not push it)."""
     c = env.object_position()
-    return np.array([c[0], c[1], c[2] + 0.005])
+    return np.array([c[0], c[1], c[2] + dz])
+
+
+def _scripted_grasp(env, tlog):
+    """Robust scripted grasp primitive: align above -> descend -> close (re-seating the fingers
+    at the grasp pose) -> lift firmly -> settle. Returns the object z BEFORE the lift."""
+    c = env.object_position()
+    scripted(env, tlog, "align", [c[0], c[1], c[2] + 0.12])
+    c = env.object_position()
+    grasp = [c[0], c[1], c[2] + 0.005]
+    scripted(env, tlog, "descend", grasp)
+    scripted(env, tlog, "close", grasp, gripper=1.0)  # re-move to grasp pose AND close (firm grip)
+    obj_z0 = float(env.object_position()[2])
+    scripted(env, tlog, "lift", None, dz=0.12)
+    scripted(env, tlog, "settle", None, settle=20)
+    return obj_z0
 
 
 def task_grasp_lift(env, ctx, tlog, args):
     env.reset(cube_xy=CUBE_START[:2])
-    grasp_pos = _grasp_goal(env)
-    goal_img = env.capture_goal_image(pos=grasp_pos, euler=EE_DOWN, gripper=0.0, camera="planning")
+    hover = _grasp_hover(env)  # V-JEPA aims for a hover ABOVE the cube, not at it (no push)
+    goal_img = env.capture_goal_image(pos=hover, euler=EE_DOWN, gripper=0.0, camera="planning")
     z_goal = ctx["encode_goal"](goal_img)
     env.reset(cube_xy=CUBE_START[:2])
-    # 1) V-JEPA reach to the grasp-ready pose (gripper frozen open)
-    cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, grasp_pos, tlog,
+    # 1) V-JEPA coarse reach to the pre-grasp hover (gripper frozen open)
+    cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, hover, tlog,
                 "vjepa_reach", args.grasp_steps, args.pos_tol, **ctx["cem_kw"])
-    # 2) scripted grasp primitive: align above the cube (vertical approach), descend, close,
-    #    lift, settle. The align-above step keeps the descent vertical so the fingers straddle
-    #    the cube instead of nudging it from the side (diagonal approach -> "pushed").
-    c = env.object_position()
-    scripted(env, tlog, "align", [c[0], c[1], c[2] + 0.12])
-    c = env.object_position()
-    scripted(env, tlog, "descend", [c[0], c[1], c[2] + 0.005])
-    scripted(env, tlog, "close", None, gripper=1.0)
-    obj_z0 = float(env.object_position()[2])
-    scripted(env, tlog, "lift", None, dz=0.08)
-    scripted(env, tlog, "settle", None, settle=20)
+    # 2) scripted grasp primitive (vertical approach + firm close + lift)
+    obj_z0 = _scripted_grasp(env, tlog)
     obj = env.object_position()
     res = grasp_lift_success(obj_z0, float(obj[2]), env.get_ee_state()[:2], obj[:2],
                              env.object_tilt(), env.object_speed(), env.gripper_holds_object(),
@@ -403,11 +410,7 @@ def task_grasp_lift(env, ctx, tlog, args):
 def task_place(env, ctx, tlog, args):
     env.reset(cube_xy=CUBE_START[:2])
     # scripted grasp + lift first so we start holding the cube reliably (place tests the release)
-    c = env.object_position()
-    scripted(env, tlog, "grasp_approach", [c[0], c[1], c[2] + 0.12])
-    scripted(env, tlog, "descend", [c[0], c[1], c[2] + 0.005])
-    scripted(env, tlog, "close", None, gripper=1.0)
-    scripted(env, tlog, "lift", None, dz=0.10)
+    _scripted_grasp(env, tlog)
     if not env.gripper_holds_object():
         res = place_success(env.object_position()[:2], env.zone_center(), env.object_tilt(),
                             env.object_speed(), env.object_released(), SUCCESS_DEFAULTS["place"])
