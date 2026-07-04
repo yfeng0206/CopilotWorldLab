@@ -13,6 +13,29 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-04 -- Camera-ablation writeup in OCT-JEPA format
+
+#### 14. Camera-ablation experiment doc: combined + per-angle tables, figures
+**Context**: Present the camera-angle ablation the way the I-JEPA_3D_OCT repo presents its
+experiments (docs/experiments with a results-summary README, embedded figures under results/,
+per-experiment tables, supported/rejected-claims split). User asks: each angle with its own
+table, showing the improvement culminating in the best angle.
+**Work**: `scripts/make_ablation_figures.py` reads the ablation CSV + rendered frames and emits
+(committed) `results/camera_ablation/`: `camera_grid.png` (the 8 angles annotated with cosine/
+rotation/verdict), `camera_ranking.png` (per-camera bar), `frame_rotation.png` (fitted rotation
+vs azimuth), plus `combined_table.md` (summary with improvement-vs-built-in) and
+`per_camera_tables.md` (one per-axis table per angle, worst->best). Rewrote
+`docs/experiments/energy_landscape_and_camera_ablation.md` in the OCT format and added
+`docs/experiments/README.md`. Improvement framing: built-in exo_cam (mean cos -0.16) -> best
+az45_el45 (+0.92) = +1.08.
+**Audit** (rubber-duck gpt-5.5 xhigh): no code bugs -- `parse_tag`, honest per-transition mean,
+`fit_plane_rotation` (matches analyze_frame_rotation.py), `camera_frame`, baseline sign, and
+thresholds all verified; generated tables match the doc. Three prose-overstatement fixes applied:
+post-rotation recovery is 0.70-0.95 not 0.84-0.95 (az90_el20 is 0.70); vertical-z claim softened
+(az135_el45 -z is +0.23); the rotation guide line relabeled as a visual guide, not a fit.
+**Outcome**: reproducible figures + tables; honest, hedged claims.
+**References**: I-JEPA_3D_OCT docs/experiments format; this session's ablation CSV + scripts.
+
 ### 2026-07-04 -- Overnight: camera-placement ablation + view-relative frame
 
 #### 13. MuJoCo transfer, camera ablation, and the view-relative horizontal frame
