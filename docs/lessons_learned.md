@@ -176,3 +176,19 @@ not sneak back in.
   Linux / WSL2 for the closed-loop success benchmark. On Windows, use the MuJoCo
   `FrankaDroidEnv` (which works) as the closed-loop platform, or move ManiSkill to WSL2/Linux.
   The V-JEPA scoring/planning code is backend-agnostic, so only the env adapter changes.
+
+### 19. Windows benchmark strategy: offline datasets first, then FrankaDroidEnv (cleanup)
+- **What happens**: both standard sim runtimes fail on Windows -- robosuite (mujoco 3.10
+  `mj_fullM`, #11) and ManiSkill/SAPIEN (Pinocchio + segfault, #18). Both were removed:
+  robosuite uninstalled from the main venv (nothing in our code imports it; 31 tests still
+  pass), and the ManiSkill probe venv deleted.
+- **Rule (the Windows-friendly benchmark path)**:
+  1. **Established grasp/place transition scoring from OFFLINE datasets** -- use robomimic
+     demonstration datasets (Lift, Can, Square, Transport), which ship image observations +
+     actions, so `benchmark_transition_scoring.py`-style scoring runs with NO sim runtime.
+     Metric: does V-JEPA 2-AC score the true action lower than random negatives on real
+     grasp/place transitions?
+  2. **Closed-loop control on `FrankaDroidEnv`** (MuJoCo, works on Windows): reach to object,
+     close gripper, lift, move to goal, open -- our own simple pick/place loop.
+  Only move to robosuite/ManiSkill sim (WSL2/Linux) if closed-loop success on an official
+  suite is required. Do not spend time fighting their Windows runtimes.
