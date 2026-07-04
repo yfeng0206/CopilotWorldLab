@@ -344,8 +344,16 @@ def scripted(env, tlog, phase, target, gripper=None, dz=None, settle=0, n=4):
             d = np.zeros(7)
             d[2] = dz / n
             env.apply_action(d)
-    for _ in range(settle):
-        env.apply_action(np.zeros(7))
+    # Settle by HOLDING the current EE pose (absolute), not zero-delta: the arm position servo
+    # droops under a held load, and a zero-delta command re-baselines to the drooping pose each
+    # step (the arm ratchets down ~9 cm). Re-commanding the captured pose keeps it lifted.
+    if settle:
+        hold = env.get_ee_state()[:3].copy()
+        for _ in range(settle):
+            cur = env.get_ee_state()[:3]
+            d = np.zeros(7)
+            d[:3] = hold - cur
+            env.apply_action(d)
     tlog.record(env, phase, None, None, float("nan"),
                 target if target is not None else None, float("nan"), float("nan"))
 

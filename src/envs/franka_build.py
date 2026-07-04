@@ -158,9 +158,9 @@ def build_franka_robotiq(menagerie_dir: str = DEFAULT_MENAGERIE, add_camera: boo
         g.type = mujoco.mjtGeom.mjGEOM_BOX
         g.size = [CUBE_HALF, CUBE_HALF, CUBE_HALF]
         g.rgba = [0.85, 0.15, 0.15, 1.0]
-        g.friction = [1.0, 0.05, 0.01]  # high tangential friction so the gripper can hold it
+        g.friction = [2.0, 0.1, 0.01]  # high tangential friction so the grip holds under static load
         g.condim = 4
-        g.density = 400.0  # ~26 g for a 4 cm cube: light enough for a reliable 2F-85 grasp
+        g.density = 250.0  # ~16 g for a 4 cm cube: light enough for a reliable, non-slipping grasp
 
     if add_zone:
         zone = world.add_body()
