@@ -10,9 +10,18 @@ CEM config (defaults follow Meta's released wrapper; smaller population for the 
     samples=200, cem_steps=10, rollout/horizon T=2, topk=10, maxnorm=0.05 m/axis, momentum 0.15.
 Later ablations (not here): T=1 vs T=2, samples 200/400/800, maxnorm 0.05 vs 0.075.
 
-Per trial we write a per-step CSV (logs/) and a GIF + contact sheet (outputs/closed_loop_benchmark/
-<run_id>/) with projected markers (red=object, blue=EE, green=zone) and a stats panel, for visual
-audit BEFORE any success-rate is claimed.
+Task decomposition (honest separation of V-JEPA vs scripted; success from hidden MuJoCo truth):
+  reach       : pure V-JEPA closed-loop to a goal image.
+  grasp_lift  : V-JEPA REACHES the grasp pose (goal image = arm at the cube); only close + lift
+                are scripted -- no privileged re-centering, so the rate reflects V-JEPA's grasp.
+  place       : scripted grasp to start holding (isolates placement), then V-JEPA DRIVES the held
+                cube over the zone; the release lowers straight down at V-JEPA's reached xy (no
+                move-to-zone-center), so the rate reflects V-JEPA's placement accuracy.
+
+Per trial: per-step CSV (logs/), a GIF, a phase-keyed contact sheet, and a readable markdown frame
+table (outputs/closed_loop_benchmark/<run_id>/). A committed trial-summary CSV with per-task
+success rates lands in results/benchmarks/closed_loop_smoke/. Cube/target positions are randomized
+per trial (seeded).
 
     python scripts/run_closed_loop_benchmark.py --tasks reach grasp_lift place --trials 1
 """
@@ -171,21 +180,31 @@ def render_panel(img, obj_px, ee_px, zone_px, zone_r_px, stats):
     return arr
 
 
-def save_contact_sheet(frames, path, cols=6):
+def save_contact_sheet(frames, path, phases=None, cols=4):
+    """Fewer, larger cells for real audit: one frame per phase transition (+ first/last), not a
+    dense grid of tiny cells. Falls back to evenly-spaced frames if phases are unknown."""
     if not frames:
         return
     n = len(frames)
-    idx = np.unique(np.linspace(0, n - 1, min(cols * 2, n)).astype(int))
+    if phases:
+        idx = [0]
+        for i in range(1, n):
+            if phases[i] != phases[i - 1]:
+                idx.append(i)
+        idx.append(n - 1)
+        idx = sorted(set(idx))
+    else:
+        idx = list(np.unique(np.linspace(0, n - 1, min(8, n)).astype(int)))
     rows = (len(idx) + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.6, rows * 1.5))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.2, rows * 2.4))
     axes = np.atleast_1d(axes).ravel()
     for a in axes:
         a.axis("off")
     for k, i in enumerate(idx):
         axes[k].imshow(frames[i])
-        axes[k].set_title(f"f{i}", fontsize=6)
+        axes[k].set_title(f"frame {i}" + (f" ({phases[i]})" if phases else ""), fontsize=9)
     fig.tight_layout()
-    fig.savefig(path, dpi=110)
+    fig.savefig(path, dpi=130)
     plt.close(fig)
 
 
@@ -206,6 +225,7 @@ class TrialLogger:
     def __init__(self, csv, task, trial, fovy, has_object):
         self.csv, self.task, self.trial, self.fovy, self.has_object = csv, task, trial, fovy, has_object
         self.frames = []
+        self.rows = []  # per-step dicts for the markdown frame table
         self.step = 0
 
     def record(self, env, phase, action, realized, energy, target, cem_time,
@@ -250,7 +270,31 @@ class TrialLogger:
             "cem_time_s": _fmt(cem_time), "success": success, "failure": failure,
         }
         self.frames.append(render_panel(img, obj_px, ee_px, zone_px, zone_r_px or 4.0, stats))
+        self.rows.append({
+            "step": self.step, "phase": phase, "energy": _fmt(energy),
+            "dist_goal": _fmt(dist_goal), "obj_dz": _fmt(obj_dz), "tilt": _fmt(tilt),
+            "speed": _fmt(speed), "held": held, "released": released, "cem_s": _fmt(cem_time),
+        })
         self.step += 1
+
+    def write_markdown(self, path, result, dt):
+        """A readable per-step frame table (audit-friendly, unlike the compressed contact sheet)."""
+        vjepa = [r for r in self.rows if str(r["phase"]).startswith("vjepa")]
+        lines = [
+            f"# {self.task} trial {self.trial}",
+            "",
+            f"- **success**: {result.success}  |  **failure**: {result.failure_type or '-'}",
+            f"- **metrics**: {result.metrics}",
+            f"- V-JEPA closed-loop steps: {len(vjepa)}; total steps: {len(self.rows)}; wall {dt:.1f}s",
+            "",
+            "| step | phase | energy | dist_goal | obj_dz | tilt | speed | held | rel | cem_s |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for r in self.rows:
+            lines.append("| {step} | {phase} | {energy} | {dist_goal} | {obj_dz} | {tilt} | "
+                         "{speed} | {held} | {released} | {cem_s} |".format(**r))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
 
 
 def _r(x):
@@ -359,10 +403,17 @@ def scripted(env, tlog, phase, target, gripper=None, dz=None, settle=0, n=4):
 
 
 # ----------------------------------------------------------------------------- tasks
+def _rand_cube_xy(rng):
+    """A randomized, reachable cube start on the table (around CUBE_START)."""
+    return (float(rng.uniform(0.45, 0.55)), float(rng.uniform(-0.15, -0.05)))
+
+
 def task_reach(env, ctx, tlog, args):
+    rng = ctx["rng"]
     env.reset()
     home = env.get_ee_state()[:3].copy()
-    target = home + np.array([0.10, -0.08, -0.06])
+    target = home + np.array([float(rng.uniform(0.06, 0.12)), float(rng.uniform(-0.10, 0.02)),
+                              float(rng.uniform(-0.08, -0.02))])
     goal_img = env.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning")
     z_goal = ctx["encode_goal"](goal_img)
     env.reset()
@@ -374,21 +425,17 @@ def task_reach(env, ctx, tlog, args):
     return res
 
 
-def _grasp_hover(env, dz=0.10):
-    """Pre-grasp hover pose above the cube -- the V-JEPA reach target (so it does not push it)."""
-    c = env.object_position()
-    return np.array([c[0], c[1], c[2] + dz])
-
-
 def _scripted_grasp(env, tlog):
-    """Robust scripted grasp primitive: align above -> descend -> close (re-seating the fingers
-    at the grasp pose) -> lift firmly -> settle. Returns the object z BEFORE the lift."""
+    """Reliable scripted grasp primitive (used to START the PLACE task holding the cube): align
+    above -> descend -> close (re-seating the fingers) -> lift -> settle. Returns object z before
+    the lift. Uses privileged cube xy -- appropriate only for isolating the downstream skill
+    (placement), NOT for the grasp_lift task, which tests V-JEPA's own grasp reach."""
     c = env.object_position()
     scripted(env, tlog, "align", [c[0], c[1], c[2] + 0.12])
     c = env.object_position()
     grasp = [c[0], c[1], c[2] + 0.005]
     scripted(env, tlog, "descend", grasp)
-    scripted(env, tlog, "close", grasp, gripper=1.0)  # re-move to grasp pose AND close (firm grip)
+    scripted(env, tlog, "close", grasp, gripper=1.0)
     obj_z0 = float(env.object_position()[2])
     scripted(env, tlog, "lift", None, dz=0.12)
     scripted(env, tlog, "settle", None, settle=20)
@@ -396,51 +443,62 @@ def _scripted_grasp(env, tlog):
 
 
 def task_grasp_lift(env, ctx, tlog, args):
-    env.reset(cube_xy=CUBE_START[:2])
-    hover = _grasp_hover(env)  # V-JEPA aims for a hover ABOVE the cube, not at it (no push)
-    goal_img = env.capture_goal_image(pos=hover, euler=EE_DOWN, gripper=0.0, camera="planning")
+    """V-JEPA must REACH the grasp pose (goal image = the arm at the cube, grasp-ready). Only the
+    close + lift are scripted -- no privileged re-centering -- so the success rate reflects
+    V-JEPA's own grasp-positioning ability."""
+    cube_xy = _rand_cube_xy(ctx["rng"])
+    env.reset(cube_xy=cube_xy)
+    c = env.object_position()
+    grasp_pos = np.array([c[0], c[1], c[2] + 0.005])  # AT the cube (fingers around it), open
+    goal_img = env.capture_goal_image(pos=grasp_pos, euler=EE_DOWN, gripper=0.0, camera="planning")
     z_goal = ctx["encode_goal"](goal_img)
-    env.reset(cube_xy=CUBE_START[:2])
-    # 1) V-JEPA coarse reach to the pre-grasp hover (gripper frozen open)
-    cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, hover, tlog,
+    env.reset(cube_xy=cube_xy)
+    # 1) V-JEPA closed-loop reach to the grasp pose (gripper frozen open the whole way)
+    cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, grasp_pos, tlog,
                 "vjepa_reach", args.grasp_steps, args.pos_tol, **ctx["cem_kw"])
-    # 2) scripted grasp primitive (vertical approach + firm close + lift)
-    obj_z0 = _scripted_grasp(env, tlog)
+    # 2) ONLY scripted: close (holding the pose V-JEPA reached) then lift -- no re-centering.
+    obj_z0 = float(env.object_position()[2])
+    scripted(env, tlog, "close", None, gripper=1.0)
+    scripted(env, tlog, "lift", None, dz=0.12)
+    scripted(env, tlog, "settle", None, settle=20)
     obj = env.object_position()
     res = grasp_lift_success(obj_z0, float(obj[2]), env.get_ee_state()[:2], obj[:2],
                              env.object_tilt(), env.object_speed(), env.gripper_holds_object(),
                              SUCCESS_DEFAULTS["grasp_lift"])
-    tlog.record(env, "final", None, None, float("nan"), None, float("nan"), float("nan"),
+    tlog.record(env, "final", None, None, float("nan"), grasp_pos, float("nan"), float("nan"),
                 success=int(res.success), failure=res.failure_type or "")
     return res
 
 
 def task_place(env, ctx, tlog, args):
-    env.reset(cube_xy=CUBE_START[:2])
-    # scripted grasp + lift first so we start holding the cube reliably (place tests the release)
-    _scripted_grasp(env, tlog)
+    """Start holding the cube via the reliable scripted grasp, then V-JEPA must DRIVE the held cube
+    over the zone. The final descent is straight DOWN at whatever xy V-JEPA reached (no scripted
+    move-to-zone-center), so placement success reflects V-JEPA's own horizontal accuracy."""
+    cube_xy = _rand_cube_xy(ctx["rng"])
+    env.reset(cube_xy=cube_xy)
+    _scripted_grasp(env, tlog)  # reliable grasp to isolate the PLACEMENT skill
     if not env.gripper_holds_object():
         res = place_success(env.object_position()[:2], env.zone_center(), env.object_tilt(),
                             env.object_speed(), env.object_released(), SUCCESS_DEFAULTS["place"])
         tlog.record(env, "final", None, None, float("nan"), None, float("nan"), float("nan"),
                     success=int(res.success), failure="grasp_failed_pre_place")
         return res
-    # place goal: EE over the zone at a low hover, then open
+    # V-JEPA reach: drive the held cube to a hover over the zone
     zone = env.zone_center()
     place_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.12])
     goal_img = env.capture_goal_image(pos=place_pos, euler=EE_DOWN, gripper=1.0, camera="planning")
     z_goal = ctx["encode_goal"](goal_img)
     cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, place_pos, tlog,
                 "vjepa_place", args.place_steps, args.pos_tol, **ctx["cem_kw"])
-    # lower, open, settle
-    zc = env.zone_center()
-    scripted(env, tlog, "lower", [zc[0], zc[1], TABLE_TOP_Z + CUBE_HALF + 0.04])
+    # scripted release: lower STRAIGHT DOWN at V-JEPA's reached xy (no move-to-zone-center), open
+    cur = env.get_ee_state()[:3]
+    scripted(env, tlog, "lower", [cur[0], cur[1], TABLE_TOP_Z + CUBE_HALF + 0.02])
     scripted(env, tlog, "open", None, gripper=-1.0)
     scripted(env, tlog, "settle", None, settle=30)
     obj = env.object_position()
     res = place_success(obj[:2], env.zone_center(), env.object_tilt(), env.object_speed(),
                         env.object_released(), SUCCESS_DEFAULTS["place"])
-    tlog.record(env, "final", None, None, float("nan"), None, float("nan"), float("nan"),
+    tlog.record(env, "final", None, None, float("nan"), place_pos, float("nan"), float("nan"),
                 success=int(res.success), failure=res.failure_type or "")
     return res
 
@@ -469,6 +527,7 @@ def main() -> None:
     p.add_argument("--place-steps", type=int, default=8)
     p.add_argument("--dtype", choices=["fp32", "bf16"], default="bf16")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--seed", type=int, default=0, help="seed for per-trial randomized init")
     args = p.parse_args()
 
     if not os.path.exists(CHECKPOINT):
@@ -520,6 +579,7 @@ def main() -> None:
         fovy = float(env.model.vis.global_.fovy)
         ctx = {
             "encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(env, fovy),
+            "rng": np.random.default_rng(args.seed + hash(task) % 1000),
             "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                            dev=dev, autocast_dtype=autocast_dtype),
         }
@@ -528,24 +588,48 @@ def main() -> None:
             t0 = time.perf_counter()
             res = TASKS[task](env, ctx, tlog, args)
             dt = time.perf_counter() - t0
+            phases = [r["phase"] for r in tlog.rows]
             gif = os.path.join(out_dir, f"{task}_t{trial}.gif")
             imageio.mimsave(gif, tlog.frames, fps=2, loop=0)
-            save_contact_sheet(tlog.frames, os.path.join(out_dir, f"{task}_t{trial}_contact.png"))
-            logger.info("[%s trial %d] success=%s failure=%s | %d frames | %.1fs -> %s",
-                        task, trial, res.success, res.failure_type, len(tlog.frames), dt,
-                        os.path.basename(gif))
+            save_contact_sheet(tlog.frames, os.path.join(out_dir, f"{task}_t{trial}_contact.png"),
+                               phases=phases)
+            tlog.write_markdown(os.path.join(out_dir, f"{task}_t{trial}_frames.md"), res, dt)
+            # separate V-JEPA closed-loop from scripted primitives for the report
+            vjepa_rows = [r for r in tlog.rows if str(r["phase"]).startswith("vjepa")]
+            vjepa_final_dist = next((r["dist_goal"] for r in reversed(vjepa_rows)
+                                     if r["dist_goal"] != "-"), "-")
+            logger.info("[%s trial %d] success=%s failure=%s | vjepa_steps=%d final_dist=%s | %.1fs",
+                        task, trial, res.success, res.failure_type, len(vjepa_rows),
+                        vjepa_final_dist, dt)
             logger.info("    metrics: %s", {k: round(v, 4) if isinstance(v, float) else v
                                             for k, v in res.metrics.items()})
-            summary.append((task, trial, res.success, res.failure_type))
+            summary.append({"task": task, "trial": trial, "success": int(res.success),
+                            "failure": res.failure_type or "", "vjepa_steps": len(vjepa_rows),
+                            "vjepa_final_dist": vjepa_final_dist, "wall_s": round(dt, 1)})
         env.close()
 
+    # per-task success rate (the headline) + a committed summary CSV
+    trial_csv = clog.CSVLogger(
+        os.path.join(_REPO_ROOT, "results", "benchmarks", "closed_loop_smoke",
+                     f"trials_{run_id}.csv"),
+        "task", "trial", "success", "failure", "vjepa_steps", "vjepa_final_dist", "wall_s",
+    )
+    for s in summary:
+        trial_csv.log(s["task"], s["trial"], s["success"], s["failure"], s["vjepa_steps"],
+                      s["vjepa_final_dist"], s["wall_s"])
+
     logger.info("-" * 64)
+    logger.info("SUCCESS RATES (config: samples=%d T=%d cem_steps=%d maxnorm=%.3f, seed=%d)",
+                args.samples, args.rollout, args.cem_steps, args.maxnorm, args.seed)
     for task in args.tasks:
-        rows = [s for s in summary if s[0] == task]
-        ok = sum(1 for s in rows if s[2])
-        logger.info("SMOKE %-11s %d/%d success | failures=%s",
-                    task, ok, len(rows), [s[3] for s in rows if not s[2]])
-    logger.info("artifacts: %s", out_dir)
+        rows = [s for s in summary if s["task"] == task]
+        ok = sum(s["success"] for s in rows)
+        fails = [s["failure"] for s in rows if not s["success"]]
+        logger.info("  %-11s %d/%d success | failures=%s", task, ok, len(rows), fails)
+    logger.info("NOTE: reach = pure V-JEPA; grasp = V-JEPA reach + scripted close/lift; "
+                "place = scripted grasp + V-JEPA place + scripted lower/open. Hidden-state success.")
+    logger.info("artifacts: %s | trial csv: results/benchmarks/closed_loop_smoke/trials_%s.csv",
+                out_dir, run_id)
     logger.info("done")
 
 
