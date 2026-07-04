@@ -298,11 +298,30 @@ better energy-gate ROC-AUC) on identical tasks — a falsifiable, established-da
 
 ## Status
 
-- Stage 0 render path **verified on Windows** (robomimic Lift raw states -> images via plain
-  MuJoCo + patched assets; cameras enumerated; start/goal frames render correctly).
-- Next coding step: implement `src/bench/schema.py` + `src/envs/robomimic_render.py` +
-  `scripts/render_robomimic_task.py`, produce Lift task bundles + contact sheet + GIF, and
-  **pause for user visual approval** before Stage 1.
+Direction (2026-07-04): reproduce the paper's closed-loop **task-success** metric honestly on our
+**own** small MuJoCo env (real physics + hidden privileged success), **not** robosuite and **not**
+a toy. Task set: **Reach + Grasp-lift (cube) + Pick-and-place (cube into zone)**.
+
+Done:
+- Paper MPC config **verified** from Meta's released code (T=2, samples=400/paper~800,
+  cem_steps=10, topk=10, maxnorm=0.05, momentum 0.15; see the table above).
+- robosuite closed-loop **dropped** (confirmed `mj_fullM` 2-array call at `controller.py:227`;
+  lessons #11).
+- Own-env foundation **built + validated**: `src/envs/franka_build.py` adds a 4 cm graspable
+  free-joint cube (`add_object`) + place-zone marker (`add_zone`); `FrankaDroidEnv` gains
+  `add_object/add_zone`, cube placement/settle on `reset(cube_xy)`, and privileged truth
+  (`object_pose/position/speed/tilt`, `zone_center`, `gripper_holds_object`). Physics checked:
+  cube rests stably; a scripted descend->close->lift grasps and lifts it (dz +0.14 m, held).
+  34 tests pass; defaults keep the arm-only env unchanged.
+
+Robomimic raw-render (Stage 0, `render_robomimic_task.py`) stays as an established-data reference
+and image source, but the closed-loop success runs in our own env.
+
+Next:
+1. Scripted expert (grasp-lift **and** place) -> capture sub-goal images (reach/grasp/lift/place)
+   -> task bundles + contact sheet + GIF for **user visual approval**.
+2. `src/bench/success.py` (Section 4) + `scripts/run_closed_loop_benchmark.py` wiring V-JEPA CEM
+   at the paper config -> staged runs (validate 3x5-8 -> 20 trials @100/@200 -> final @800).
 
 References: [benchmark_plan.md](benchmark_plan.md), [transition_scoring.md](transition_scoring.md),
 [cem_closed_loop.md](cem_closed_loop.md), [../lessons_learned.md](../lessons_learned.md) #11/#19.

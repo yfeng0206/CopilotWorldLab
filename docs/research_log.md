@@ -13,7 +13,32 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
-### 2026-07-04 -- DROID real transition-scoring baseline + robomimic Windows block
+### 2026-07-04 -- Closed-loop task-success benchmark: paper config + own honest env
+
+#### 17. Reproduce the paper's success-rate metric on our own MuJoCo env (not robosuite, not toy)
+**Context**: The paper's headline robot metric is closed-loop **task-success rate** (Reach 100%,
+Grasp/Place 25-80%), not transition ranking. Directive: be honest to the paper, reproduce it, drop
+"simple/toy" work. We can use our own smaller test env if it is honest (real physics + hidden
+success), just not a toy/hack.
+**Verified planning config (primary source = Meta's released `notebooks/utils/world_model_wrapper.py`
++ `mpc_utils.py::cem`)**: horizon `rollout`=2 (T=2), `samples`=400 (paper ~800), `cem_steps`=10,
+`topk`=10, `maxnorm`=0.05 m/axis, momentum 0.15; objective = mean-L1 in layer-norm'd latent;
+receding-horizon replan. CEM samples xyz+gripper (rotation zeroed), rolls out T steps, compares the
+final predicted latent to the goal, top-k update.
+**robosuite dropped for closed-loop**: confirmed the crash is robosuite's old 2-array
+`mujoco.mj_fullM(model, mass_matrix, data.qM)` at `controllers/parts/controller.py:227` vs mujoco
+3.10's `mj_fullM(m, d, dst)` binding. robosuite 1.5.2 requires `mujoco>=3.3.0`, and 3.3.0 still has
+the 2-array binding, so robosuite runs only in a separate pinned-mujoco venv -- which we choose not
+to maintain. Raw-state *rendering* still works (lessons #11).
+**Own honest env built + validated**: `franka_build.add_object` adds a 4 cm graspable free-joint
+cube (high friction, ~26 g) and `add_zone` a place-target marker; `FrankaDroidEnv` gains
+`add_object/add_zone`, cube placement/settle on `reset(cube_xy)`, and privileged truth accessors
+(`object_pose/position/speed/tilt`, `zone_center`, `gripper_holds_object`). Physics validated: cube
+rests stably (z=0.24, v=0); scripted descend->close->lift grasps and lifts it (dz +0.14 m,
+held=True). 34 tests pass; defaults keep the arm-only env unchanged.
+**Outcome**: foundation ready for the paper-aligned 3 tasks (Reach/Grasp-lift/Pick-and-place). Next:
+scripted expert -> sub-goal images -> task bundles + contact sheet/GIF for visual approval, then the
+CEM benchmark runner + staged runs. Plan: `docs/experiments/closed_loop_success_plan.md`.
 
 #### 16. Robomimic images blocked on Windows -> DROID real baseline (benchmark 1 hardened)
 **Context**: Plan was robomimic offline datasets (Lift/Can/Square) for grasp/place transition
