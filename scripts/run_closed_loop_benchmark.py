@@ -380,7 +380,11 @@ def task_grasp_lift(env, ctx, tlog, args):
     # 1) V-JEPA reach to the grasp-ready pose (gripper frozen open)
     cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, grasp_pos, tlog,
                 "vjepa_reach", args.grasp_steps, args.pos_tol, **ctx["cem_kw"])
-    # 2) scripted descend onto the cube, close, lift, settle
+    # 2) scripted grasp primitive: align above the cube (vertical approach), descend, close,
+    #    lift, settle. The align-above step keeps the descent vertical so the fingers straddle
+    #    the cube instead of nudging it from the side (diagonal approach -> "pushed").
+    c = env.object_position()
+    scripted(env, tlog, "align", [c[0], c[1], c[2] + 0.12])
     c = env.object_position()
     scripted(env, tlog, "descend", [c[0], c[1], c[2] + 0.005])
     scripted(env, tlog, "close", None, gripper=1.0)
