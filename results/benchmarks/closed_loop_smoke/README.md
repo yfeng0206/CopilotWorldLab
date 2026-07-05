@@ -14,11 +14,26 @@ All 30 trials: [`comparison_5trial.csv`](comparison_5trial.csv).
 
 ## Demo: ground truth vs V-JEPA (side-by-side)
 
-![reach demo: ground truth vs V-JEPA](demo_reach_compare.gif)
+Each demo plays the expert reference (left) next to V-JEPA (right) on the *same* seeded scene under
+the same env actuator limit, in sync. `python scripts/run_closed_loop_benchmark.py --demo <task>`.
 
-The optimal straight-line reach (**GROUND TRUTH**, left) and **V-JEPA (ours)** (right) drive to the
-*same* seeded target under the same per-step action clip, in sync with a live distance readout
-(GT ~1 cm vs V-JEPA ~3 cm). Regenerate: `python scripts/run_closed_loop_benchmark.py --demo reach`.
+**Reach** — optimal straight-line vs V-JEPA closed-loop (GT ~1 cm vs V-JEPA ~3 cm):
+
+![reach demo](demo_reach_compare.gif)
+
+**Grasp-Lift** — scripted-expert grasp vs V-JEPA reaching the grasp pose (this seed: V-JEPA lands
+2.6 cm out and the grip misses):
+
+![grasp_lift demo](demo_grasp_lift_compare.gif)
+
+**Place** — scripted-expert pick-and-place vs V-JEPA driving the held cube (V-JEPA ~15.6 cm,
+outside the zone):
+
+![place demo](demo_place_compare.gif)
+
+**Pick-Place** — scripted-expert vs the full V-JEPA composite (grasp→transport→place, 4/10/4):
+
+![pick_place demo](demo_pick_place_compare.gif)
 
 ## Goal-image check (auditability)
 
