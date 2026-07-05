@@ -38,10 +38,15 @@ Reproducible experiments with honest, primary-source-verified numbers (see
 - **Closed-loop CEM (Phase 1 pilot)**: reach to a goal image **succeeds** in the control loop;
   the ~3 cm precision floor is diagnosed as a model/interface limit (tracking error only 9 mm).
   [writeup](docs/experiments/cem_closed_loop.md)
+- **Closed-loop task success (Phase 1)**: honest Reach / Grasp-Lift / Place on our own MuJoCo
+  env (V-JEPA plans the coarse motion; scripted gripper; hidden-state success). 5 trials/task:
+  **Reach 5/5, Grasp-Lift 3/5, Place 0/5** — place plateaus ~15 cm vs the 6 cm zone, exposing the
+  precision gap the Phase 2–4 improvements must close. Rollout GIFs + methodology:
+  [closed_loop_benchmark.md](docs/experiments/closed_loop_benchmark.md).
 
-Honest boundary: no closed-loop **task-success** rate has been measured yet — that is the Phase-1
-benchmark, built on our own honest MuJoCo grasp/place env (real physics + hidden privileged
-success; [plan](docs/experiments/closed_loop_success_plan.md)).
+Honest boundary: only Reach is a pure V-JEPA success; grasp/place are V-JEPA coarse motion +
+scripted gripper, scored on hidden privileged sim state. A full 50-trial precision-curve run
+(success at multiple thresholds) is prepared (`scripts/run_closed_loop_benchmark.py --trials 50`).
 
 ## Repository layout
 
@@ -97,6 +102,7 @@ git -C third_party/mujoco_menagerie sparse-checkout set franka_emika_panda robot
 | Technical architecture + flowcharts | [`docs/architecture.md`](docs/architecture.md) |
 | Compute budget, checkpoint, fine-tune plan | [`docs/vjepa2_ac_architecture.md`](docs/vjepa2_ac_architecture.md) |
 | Experiments (energy landscape, ablation, benchmarks, closed loop) | [`docs/experiments/`](docs/experiments) |
+| Closed-loop task-success benchmark (setup, criteria, logging, results) | [`docs/experiments/closed_loop_benchmark.md`](docs/experiments/closed_loop_benchmark.md) |
 | Evaluation strategy | [`docs/experiments/benchmark_plan.md`](docs/experiments/benchmark_plan.md) |
 | Related work (full-text-verified) | [`docs/related_work.md`](docs/related_work.md) |
 | Research log + bibliography | [`docs/research_log.md`](docs/research_log.md) |
