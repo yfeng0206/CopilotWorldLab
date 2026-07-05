@@ -56,20 +56,37 @@ place: outside_zone / tipped / unstable / still_attached).
 ## CEM planning config (verified from Meta's released code)
 
 model V-JEPA 2-AC ViT-g · samples **200** · cem_steps **10** · topk **10** · rollout **T=2** ·
-maxnorm **0.05 m/axis** · momentum 0.15 · bf16 · objective = mean-L1 in layer-norm'd latent with
-the gripper axis frozen · receding-horizon replan. (Released `world_model_wrapper.py` defaults;
-the paper text quotes a larger population ~800 and may report horizon 1 — we ablate T=1 vs T=2 and
-samples 200/400/800 later. See [../architecture.md](../architecture.md#7-planner-config-verified-from-released-code).)
+maxnorm **0.05 m/axis** · momentum_mean 0.15 · momentum_std **0.15** · pos_tol **0.015 m** · bf16 ·
+objective = mean-L1 in layer-norm'd latent with the gripper axis frozen · receding-horizon replan.
+(Matches Meta's released `world_model_wrapper.py` robot config; `momentum_std=0.15` and
+`pos_tol=0.015` set the loop to keep refining down to the tightest precision threshold. The paper
+text quotes a larger population ~800 and may report horizon 1 — we ablate T=1 vs T=2 and samples
+200/400/800 later. See [../architecture.md](../architecture.md#7-planner-config-verified-from-released-code).)
+
+## Protocols: single-goal vs multistage
+
+The released `cem()` takes a single `goal_frame`, so a paper-like multi-sub-goal schedule is an
+**outer loop that swaps the goal image between stages** (`--protocol multistage`), each stage
+running single-goal CEM. `--protocol single_goal` uses one goal image per task (baseline).
+
+- **Reach**: one stage in both protocols.
+- **Grasp-Lift**: single_goal = one grasp goal; multistage = **pregrasp** (arm hovering above the
+  cube) then **grasp** (arm around the cube). Only close+lift are scripted.
+- **Place**: single_goal = one held-cube-over-zone goal; multistage = **vicinity** (held cube high
+  over the zone) then **final** (held cube lowered onto the zone). The release lower+open is
+  scripted. The place sub-goals keep the cube *held* (V-JEPA controls the held EE and cannot drive
+  the gripper away without dragging the cube), so a held-low goal is the reachable placement target.
 
 ## How to run
 
 ```
-# smoke (wiring / a few trials)
-python scripts/run_closed_loop_benchmark.py --tasks reach grasp_lift place --trials 5 --tag smoke
+# smoke comparison (5 trials/task, both protocols)
+python scripts/run_closed_loop_benchmark.py --protocol single_goal --tasks reach grasp_lift place --trials 5 --tag single_goal_smoke
+python scripts/run_closed_loop_benchmark.py --protocol multistage  --tasks reach grasp_lift place --trials 5 --tag multistage_smoke
 
 # full benchmark (50 trials/task, precision curves)
 python scripts/run_closed_loop_benchmark.py \
-    --tasks reach grasp_lift place --trials 50 \
+    --protocol multistage --tasks reach grasp_lift place --trials 50 \
     --samples 200 --cem-steps 10 --rollout 2 --maxnorm 0.05
 ```
 
@@ -97,23 +114,44 @@ released, success/failure).
 
 ## Results
 
-### Smoke, 5 trials/task (config above, seed 0)
+### Smoke comparison, 5 trials/task, single-goal vs multistage (config above, seed 0)
 
-| task | success (loosest τ) | mean V-JEPA final error | read |
-|---|---|---|---|
-| **Reach** | **5/5** | 3–7 cm | pure V-JEPA closed-loop is reliable |
-| **Grasp-Lift** | **3/5** | 5.5–7.7 cm | V-JEPA positions the gripper well enough to grasp ~60%; misses are `missed` |
-| **Place** | **0/5** | **15–18 cm** | vanilla V-JEPA can't precisely place the held cube — plateaus ~15 cm vs the 6 cm zone (all `outside_zone`) |
+Each rollout records one continuous error; `success@t` = error < t AND all physical gates. n=5 is a
+wiring/comparison check, not a converged rate. Full report + GIFs:
+[results/benchmarks/closed_loop_smoke/](../../results/benchmarks/closed_loop_smoke/).
 
-Honest reading: reach is easy; grasp is decent; **place exposes the precision gap** — the held-
-object horizontal placement plateaus well outside the zone. This is the vanilla baseline the
-improvements (W* frame calibration, predictor fine-tuning, and the POV/cross-view method,
-Phases 2–4) must beat, measured on this exact protocol.
+| task | protocol | mean err (cm) | success @ thresholds | physical gates |
+|---|---|---|---|---|
+| **Reach** | both (identical) | 2.4 | @5cm **100%**, @3cm 80%, @1.5cm 20% | — |
+| **Grasp-Lift** | single_goal | 2.24 | @6cm 60%, @3cm 40%, @2cm 20% | held 3/5 |
+| **Grasp-Lift** | **multistage** | **1.68** | @6cm **80%**, @3cm **80%**, @2cm **60%** | held **4/5** |
+| **Place** | single_goal | 15.6 | @10cm **0%** … @1.5cm 0% | released 5/5 |
+| **Place** | multistage | 16.6 | @10cm **0%** … @1.5cm 0% | released 5/5 |
+
+Honest reading:
+
+- **Reach** is a reliable coarse skill.
+- **Multistage clearly helps grasp**: the pregrasp → grasp top-down approach doubles @3cm success
+  (40% → 80%), lowers error (2.24 → 1.68 cm), and raises held 3/5 → 4/5.
+- **Multistage does not help place** (16.6 vs 15.6 cm, both 0%): the vicinity → final descent adds
+  error with no meaningful horizontal waypoint — our place is short-horizon, unlike the paper's
+  from-scratch pick-and-place.
+- **Place is a genuine V-JEPA placement-precision limit, not a goal-image artifact.** Fixing the
+  malformed place goal image (the held cube is now rigidly carried over the zone rather than left
+  behind at its grasp site) did **not** improve place (~15.6 cm, was ~15–18 cm). Likely cause:
+  V-JEPA's latent similarity is dominated by the large arm/gripper pose, not the small cube, so the
+  object's position in the goal image has little planning leverage. This is the vanilla baseline the
+  improvements (W* frame calibration, predictor fine-tuning, POV/cross-view; Phases 2–4) must beat.
+
+Note on reproducibility: seeds pin the RNG (cube/target placement, CEM samples), but bf16 GPU
+forward kernels are non-deterministic, so per-trial errors vary run-to-run; the 50-trial run
+reports distributions (mean/median/percentiles), which are stable, rather than exact per-trial
+values.
 
 Representative rollouts (`results/benchmarks/closed_loop_smoke/`): `reach_success.gif`,
-`grasp_success.gif`, `grasp_missed.gif`, `place_outside_zone.gif` (+ contact sheets);
-`trials_5trial.csv` has all 15 trials. The full 50-trial precision-curve run is prepared but not
-yet run.
+`grasp_multistage_success.gif`, `grasp_single_missed.gif`, `place_fail.gif` (+ contact sheets);
+`comparison_5trial.csv` has all 30 trials. The full 50-trial precision-curve run is prepared but
+not yet run.
 
 ## Reproduce
 

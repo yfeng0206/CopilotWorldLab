@@ -35,11 +35,14 @@ Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows
 *task* sources (#11/#19); DROID gives the real-robot *transition* baseline. The plan is
 benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
-1. **Run the full 50-trial precision-curve benchmark** (after code review). The fire-ready runner
-   (`scripts/run_closed_loop_benchmark.py --trials 50`) records a continuous error per trial and
-   computes success at many thresholds (Reach 5/3/1.5cm, Grasp 6/5/3/2cm, Place 10/6/3/1.5cm) with
-   plots + full run-logging. Smoke (5/task): **Reach 5/5, Grasp 3/5, Place 0/5** — place plateaus
-   ~15 cm vs the 6 cm zone (`docs/experiments/closed_loop_benchmark.md`).
+1. **Run the full 50-trial precision-curve benchmark** (protocol decision pending). The runner
+   (`scripts/run_closed_loop_benchmark.py --protocol multistage --trials 50`) records a continuous
+   error per trial and computes success at many thresholds (Reach 5/3/1.5cm, Grasp 6/5/3/2cm, Place
+   10/6/3/1.5cm) with plots + full run-logging. Smoke comparison (n=5, single-goal vs multistage):
+   **Reach mean 2.4cm (100%@5cm); Grasp multistage helps (@3cm 40%→80%, held 3/5→4/5); Place fails
+   ~15-16cm under both protocols** — a genuine V-JEPA precision limit, not a goal-image artifact
+   (`docs/experiments/closed_loop_benchmark.md`). Open decision: per-task protocol (grasp=multistage,
+   place=single_goal) vs both-protocol 50-trial run.
 2. **W* calibration + re-run.** Fit/freeze the App. B.4 horizontal rotation for the planning
    camera and re-run the benchmark; expect grasp/place error to drop -- the first improvement delta.
 3. **FrankaDroidEnv closed-loop pick/place** — DONE (Reach/Grasp/Place runner + hidden success).

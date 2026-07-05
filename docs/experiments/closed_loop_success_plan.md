@@ -353,5 +353,27 @@ Next:
    implemented `src/bench/success.py` for hidden success -> staged runs (validate 3x5-8 ->
    20 trials @100/@200 -> final @800). Reconcile the T=1/T=2 horizon against the paper.
 
+## Sub-goal protocol abstraction (single-goal vs multistage)
+
+The released `cem()` (`third_party/vjepa2/notebooks/utils/mpc_utils.py`) takes a **single**
+`goal_frame`, so the paper's multi-sub-goal pick-and-place is realized as an **outer loop that
+swaps the goal image between stages**, each stage running single-goal CEM. The runner implements
+this as a minimal `Stage(name, goal_fn, max_steps)` dataclass + a generic `run_vjepa_stages` loop,
+selected by `--protocol {single_goal, multistage}` (no config framework, no hardcoded per-demo
+branching):
+
+- **Reach**: one stage in both protocols.
+- **Grasp-Lift**: single_goal = one grasp goal; multistage = pregrasp (hover) -> grasp. Close+lift
+  scripted.
+- **Place**: single_goal = one held-cube-over-zone goal; multistage = vicinity (high) -> final
+  (low). Release scripted. Sub-goals keep the cube *held* — V-JEPA drives the held EE and cannot
+  move the gripper away without dragging the cube, so a held-low goal is the reachable target.
+
+Empirical outcome (n=5, see [closed_loop_benchmark.md](closed_loop_benchmark.md)): multistage helps
+**grasp** (a meaningful vertical waypoint: @3cm 40%->80%, held 3/5->4/5) but **not place** (no
+meaningful horizontal waypoint; the descent adds error). Place fails ~15-16 cm under both protocols
+even after the held-object goal-image fix — a genuine V-JEPA precision limit, not a goal-image
+artifact.
+
 References: [benchmark_plan.md](benchmark_plan.md), [transition_scoring.md](transition_scoring.md),
 [cem_closed_loop.md](cem_closed_loop.md), [../lessons_learned.md](../lessons_learned.md) #11/#19.
