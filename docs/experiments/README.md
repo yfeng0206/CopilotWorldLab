@@ -35,7 +35,7 @@ docs/experiments/
   cem_closed_loop.md                           Phase 1 pilot: closed-loop CEM planning to goal image(s)
   closed_loop_success_plan.md                  closed-loop task-success benchmark strategy
   closed_loop_benchmark.md                     closed-loop task success: setup, criteria, logging, results
-results/benchmarks/closed_loop_smoke/          Reach/Grasp/Place rollout GIFs + contact sheets + trials CSV
+results/benchmarks/closed_loop_smoke/          single-goal vs multistage GIFs + GT-vs-V-JEPA demo + goal-image check + CSVs
 results/benchmarks/
   droid_transition_scoring.png                 rank_frac distribution + image-conditioning control
   droid_transition_scoring.csv                 per-transition source rows

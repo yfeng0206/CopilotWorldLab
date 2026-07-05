@@ -111,8 +111,9 @@ tests/test_success.py              unit tests for success functions
 tests/test_robomimic_render.py     patch_asset_paths + bundle round-trip (skipped if data absent)
 ```
 
-Artifacts: `tasks/<task_id>/...` bundles (gitignored, large), `results/benchmarks/closed_loop/`
-(committed summary CSV/JSON + figures + a few small contact sheets for provenance).
+Artifacts: `tasks/<task_id>/...` bundles (gitignored, large); the committed benchmark reports live
+under `results/benchmarks/closed_loop_<tag>/` (summary CSV/MD + figures + selected GIFs), with the
+smoke comparison + demo in `results/benchmarks/closed_loop_smoke/`.
 
 ---
 

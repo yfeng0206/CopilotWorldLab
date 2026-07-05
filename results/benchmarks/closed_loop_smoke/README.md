@@ -12,6 +12,14 @@ statistically converged rate; the full 50-trial run is the authoritative precisi
 reports: [single_goal](../closed_loop_single_goal_smoke/), [multistage](../closed_loop_multistage_smoke/).
 All 30 trials: [`comparison_5trial.csv`](comparison_5trial.csv).
 
+## Demo: ground truth vs V-JEPA (side-by-side)
+
+![reach demo: ground truth vs V-JEPA](demo_reach_compare.gif)
+
+The optimal straight-line reach (**GROUND TRUTH**, left) and **V-JEPA (ours)** (right) drive to the
+*same* seeded target under the same per-step action clip, in sync with a live distance readout
+(GT ~1 cm vs V-JEPA ~3 cm). Regenerate: `python scripts/run_closed_loop_benchmark.py --demo reach`.
+
 ## Goal-image check (auditability)
 
 ![goal image check](goal_image_check.png)

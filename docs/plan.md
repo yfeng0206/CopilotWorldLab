@@ -35,14 +35,16 @@ Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows
 *task* sources (#11/#19); DROID gives the real-robot *transition* baseline. The plan is
 benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
-1. **Run the full 50-trial precision-curve benchmark** (protocol decision pending). The runner
-   (`scripts/run_closed_loop_benchmark.py --protocol multistage --trials 50`) records a continuous
-   error per trial and computes success at many thresholds (Reach 5/3/1.5cm, Grasp 6/5/3/2cm, Place
-   10/6/3/1.5cm) with plots + full run-logging. Smoke comparison (n=5, single-goal vs multistage):
-   **Reach mean 2.4cm (100%@5cm); Grasp multistage helps (@3cm 40%→80%, held 3/5→4/5); Place fails
-   ~15-16cm under both protocols** — a genuine V-JEPA precision limit, not a goal-image artifact
-   (`docs/experiments/closed_loop_benchmark.md`). Open decision: per-task protocol (grasp=multistage,
-   place=single_goal) vs both-protocol 50-trial run.
+1. **Run the full 50-trial precision-curve benchmark** (paper-faithful, split per task). The runner
+   records a continuous error per trial and computes success at many thresholds. Paper-faithful
+   protocol (arXiv 2506.09985 §4.2, verified): **reach** (1 goal), **grasp_lift** single-goal
+   (1 goal; multistage kept as a labeled ablation), **pick_place** (3 sub-goals, fixed 4/10/4).
+   Split calls per task so each gets its fair protocol:
+   `--tasks reach grasp_lift --trials 50 --tag full` and `--tasks pick_place --trials 50 --tag full`.
+   Smoke (n=5): **Reach mean 2.4cm (100%@5cm); Grasp multistage helps (@3cm 40%→80%, held 3/5→4/5);
+   Place ~15-16cm** (both protocols; likely a precision limit, confirm at 50). pick_place validated
+   1 trial (grasp holds; honest hard-task ~29cm). Side-by-side GT-vs-V-JEPA demo done
+   (`--demo reach`). (`docs/experiments/closed_loop_benchmark.md`.)
 2. **W* calibration + re-run.** Fit/freeze the App. B.4 horizontal rotation for the planning
    camera and re-run the benchmark; expect grasp/place error to drop -- the first improvement delta.
 3. **FrankaDroidEnv closed-loop pick/place** — DONE (Reach/Grasp/Place runner + hidden success).

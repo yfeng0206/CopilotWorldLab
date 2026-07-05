@@ -19,10 +19,35 @@ precision thresholds** from the same run (a precision curve).
 | **Reach** | full closed-loop to a goal image | — | `‖EE_final − target‖` |
 | **Grasp-Lift** | reaches the grasp pose (goal = arm at the cube) | close + lift only | `‖object_xy − EE_xy‖` before close |
 | **Place** | drives the held cube over the zone | scripted grasp to start; lower-straight-down + open | `‖object_xy_final − zone_xy‖` |
+| **Pick-Place** | the WHOLE composite: grasp reach → transport → place, across 3 sub-goals (4/10/4) | close after grasp; lower + open after place | `‖object_xy_final − zone_xy‖` |
 
 No privileged re-centering is used inside the V-JEPA phase, so grasp/place numbers reflect
-V-JEPA's own positioning. (The place task scripts the *initial* grasp to isolate the placement
-skill.)
+V-JEPA's own positioning. (The isolated *place* task scripts the *initial* grasp to isolate the
+placement skill; the *pick_place* task does not — V-JEPA does the grasp too.)
+
+## Paper protocol (verified) and our stage mapping
+
+The number of goal images per task is taken directly from the V-JEPA 2 paper (arXiv 2506.09985
+§4.2, verified against the PDF, not a summary):
+
+| paper task | # goal images | schedule | our task | our stages |
+|---|---|---|---|---|
+| Single-goal reaching | **1** | single goal, replan each step | `reach` | 1 stage |
+| Grasp | **1** | single goal | `grasp_lift` | 1 stage (paper-faithful default) |
+| Reach-with-object | **1** | single goal | (not implemented) | — |
+| Pick-and-Place | **3** (2 sub-goals + final) | **4 / 10 / 4** time-steps | `pick_place` | 3 stages, fixed 4/10/4 |
+
+Paper goal images for pick-and-place: (1) the object being grasped, (2) the object in the
+*vicinity* of the goal, (3) the object *at* the goal. Sub-goals switch on a fixed step budget
+(4→10→4), not on reaching — so `pick_place` stages use `fixed_steps` (no distance early-stop).
+
+Two honest notes on fidelity: (a) the paper's robot uses action clip **maxnorm = L1-ball radius
+0.075** (~13 cm/step) and averages over **10 trials**; we default to maxnorm 0.05 (the released-code
+value) and run more trials — 0.075 is a documented ablation, not our default. (b) The paper controls
+the gripper via the CEM `close_gripper` schedule; we script the close/open at stage transitions,
+consistent with our V-JEPA-does-spatial / scripted-does-gripper decomposition. Our **multistage
+grasp** (pregrasp→grasp) is *our* addition, not the paper's single-goal grasp, so it is reported
+only as a labeled ablation (`--protocol multistage`).
 
 ## Success criteria (hidden state)
 
@@ -86,11 +111,22 @@ running single-goal CEM. `--protocol single_goal` uses one goal image per task (
 python scripts/run_closed_loop_benchmark.py --protocol single_goal --tasks reach grasp_lift place --trials 5 --tag single_goal_smoke
 python scripts/run_closed_loop_benchmark.py --protocol multistage  --tasks reach grasp_lift place --trials 5 --tag multistage_smoke
 
-# full benchmark (50 trials/task, precision curves)
-python scripts/run_closed_loop_benchmark.py \
-    --protocol multistage --tasks reach grasp_lift place --trials 50 \
-    --samples 200 --cem-steps 10 --rollout 2 --maxnorm 0.05
+# paper-faithful pick-and-place (3 sub-goals, fixed 4/10/4)
+python scripts/run_closed_loop_benchmark.py --tasks pick_place --trials 50 --tag full
+
+# reach / grasp full benchmark (grasp single-goal = paper-faithful)
+python scripts/run_closed_loop_benchmark.py --tasks reach grasp_lift --trials 50 --tag full
+
+# side-by-side ground-truth vs V-JEPA demo GIF
+python scripts/run_closed_loop_benchmark.py --demo reach
 ```
+
+## Demo: ground truth vs V-JEPA
+
+`--demo reach` builds `results/benchmarks/closed_loop_smoke/demo_reach_compare.gif`: the **optimal
+straight-line reach (GROUND TRUTH)** and **V-JEPA (ours)** driving to the *same* seeded target under
+the same per-step action clip, played in sync with a live distance readout. It shows how V-JEPA's
+planned path compares to the ideal (GT ~1 cm vs V-JEPA ~3 cm on the reference target).
 
 ## Logging and outputs
 
