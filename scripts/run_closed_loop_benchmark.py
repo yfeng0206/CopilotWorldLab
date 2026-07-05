@@ -69,6 +69,7 @@ from src.bench.success import (  # noqa: E402
     place_success,
     reach_success,
 )
+from src.bench.thresholds import GATE_SPEC, THRESHOLDS, success_at  # noqa: E402
 
 clog = _load_by_path("cwlab_logging", os.path.join(_REPO_ROOT, "src", "utils", "logging.py"))
 
@@ -389,7 +390,18 @@ def make_planner(cem, compute_new_pose, predictor, tokens_per_frame, args, dev, 
 
     def step_predictor(reps, actions, poses):
         b, t, n_t, d = reps.size()
-        nxt = predictor(reps.flatten(1, 2), actions, poses)[:, -tokens_per_frame:]
+        reps_flat = reps.flatten(1, 2)
+        # Chunk the predictor forward over the CEM sample batch (samples are independent, so this is
+        # mathematically identical) to cap peak VRAM. args.chunk<=0 or >=b runs the whole batch.
+        chunk = args.chunk if (0 < args.chunk < b) else b
+        if chunk >= b:
+            nxt = predictor(reps_flat, actions, poses)[:, -tokens_per_frame:]
+        else:
+            outs = []
+            for i in range(0, b, chunk):
+                sl = slice(i, i + chunk)
+                outs.append(predictor(reps_flat[sl], actions[sl], poses[sl])[:, -tokens_per_frame:])
+            nxt = torch.cat(outs, dim=0)
         nxt = F.layer_norm(nxt, (nxt.size(-1),)).view(b, 1, n_t, d)
         return nxt, compute_new_pose(poses[:, -1:], actions[:, -1:])
 
@@ -502,21 +514,7 @@ def run_vjepa_stages(env, ctx, tlog, stages, args) -> Optional[np.ndarray]:
 
 
 # ----------------------------------------------------------------------------- tasks
-# Precision-curve thresholds (metres): success is evaluated at MANY thresholds from one rollout
-# (the recorded continuous error), so we get a precision curve instead of one arbitrary cutoff.
-THRESHOLDS = {
-    "reach": [0.05, 0.03, 0.015],
-    "grasp_lift": [0.06, 0.05, 0.03, 0.02],
-    "place": [0.10, 0.06, 0.03, 0.015],
-    "pick_place": [0.10, 0.06, 0.03, 0.015],
-}
-# The physical gates that must ALSO hold (beyond the precision threshold) for a real success.
-GATE_SPEC = {
-    "reach": [],
-    "grasp_lift": ["lifted", "held", "upright", "stable"],
-    "place": ["upright", "stable", "released"],
-    "pick_place": ["upright", "stable", "released"],
-}
+# THRESHOLDS + GATE_SPEC + success_at live in src/bench/thresholds.py (importable + unit-tested).
 # Stable per-task seed offsets. Do NOT use hash(task): Python randomizes string hashing per
 # process (PYTHONHASHSEED), so it would break cross-run reproducibility of the seeded init.
 TASK_SEED_OFFSET = {"reach": 0, "grasp_lift": 1, "place": 2, "pick_place": 3}
@@ -570,29 +568,77 @@ def gt_reach(env, target, tlog, max_steps, maxnorm):
                     float(np.linalg.norm(env.get_ee_state()[:3] - target)))
 
 
+def _gt_grasp(env, tlog):
+    """Ground-truth scripted-expert grasp+lift (uses privileged cube xy): align above -> descend ->
+    close -> lift -> settle. The 'how it should look' reference for the grasp_lift demo."""
+    c = env.object_position()
+    scripted(env, tlog, "gt_align", [c[0], c[1], c[2] + 0.12])
+    c = env.object_position()
+    grasp = [c[0], c[1], c[2] + 0.005]
+    scripted(env, tlog, "gt_descend", grasp)
+    scripted(env, tlog, "gt_close", grasp, gripper=1.0)
+    scripted(env, tlog, "gt_lift", None, dz=0.12)
+    scripted(env, tlog, "gt_settle", None, settle=20)
+
+
+def _gt_pick_place(env, tlog):
+    """Ground-truth scripted-expert pick-and-place: grasp -> transport over the zone CENTER ->
+    lower -> open -> settle. The reference the V-JEPA place / pick_place rollout is compared to."""
+    c = env.object_position()
+    scripted(env, tlog, "gt_align", [c[0], c[1], c[2] + 0.12])
+    c = env.object_position()
+    grasp = [c[0], c[1], c[2] + 0.005]
+    scripted(env, tlog, "gt_descend", grasp)
+    scripted(env, tlog, "gt_close", grasp, gripper=1.0)
+    scripted(env, tlog, "gt_lift", None, dz=0.14)
+    zone = env.zone_center()
+    scripted(env, tlog, "gt_transport", [zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.14])
+    scripted(env, tlog, "gt_lower", [zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.02])
+    scripted(env, tlog, "gt_open", None, gripper=-1.0)
+    scripted(env, tlog, "gt_settle", None, settle=20)
+
+
 def run_demo(env, ctx, args, out_path):
-    """Build a side-by-side GROUND-TRUTH vs V-JEPA comparison GIF for the reach task: both rollouts
-    drive to the SAME seeded target under the same per-step action clip, played in sync so the
-    viewer can compare V-JEPA's planned motion against the optimal straight-line reference."""
-    rng = ctx["rng"]
-    target = _reach_target(env, rng)
-    # ground truth (optimal straight-line reach)
-    env.reset()
-    gt = TrialLogger(ctx["csv"], "demo_reach_gt", 0, ctx["fovy"], False)
-    gt_reach(env, target, gt, args.reach_steps + 3, args.maxnorm)
-    # V-JEPA closed-loop reach to the same target
-    env.reset()
-    ours = TrialLogger(ctx["csv"], "demo_reach_vjepa", 0, ctx["fovy"], False)
+    """Build a side-by-side GROUND-TRUTH vs V-JEPA comparison GIF for the chosen task. Both rollouts
+    run on the SAME seeded scene (target / cube position) under the same env actuator limit, played
+    in sync so the viewer can compare V-JEPA's planned motion against the expert reference.
 
-    def reach_goal(e, ctx):
-        return e.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning"), target
+    reach       : GT = optimal straight-line reach; ours = V-JEPA closed-loop.
+    grasp_lift  : GT = scripted-expert grasp+lift; ours = V-JEPA reaches the grasp pose (+scripted
+                  close/lift).
+    place       : GT = scripted-expert pick-and-place; ours = scripted grasp + V-JEPA place.
+    pick_place  : GT = scripted-expert pick-and-place; ours = full V-JEPA composite (4/10/4)."""
+    task = args.demo
+    if task == "reach":
+        target = _reach_target(env, ctx["rng"])
+        env.reset()
+        gt = TrialLogger(ctx["csv"], "demo_reach_gt", 0, ctx["fovy"], False)
+        gt_reach(env, target, gt, args.reach_steps + 3, args.maxnorm)
+        env.reset()
+        ours = TrialLogger(ctx["csv"], "demo_reach_vjepa", 0, ctx["fovy"], False)
 
-    run_vjepa_stages(env, ctx, ours, [Stage("vjepa_reach", reach_goal, args.reach_steps)], args)
+        def reach_goal(e, ctx):
+            return e.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning"), target
+
+        run_vjepa_stages(env, ctx, ours, [Stage("vjepa_reach", reach_goal, args.reach_steps)], args)
+        side_by_side_gif(gt.steps, ours.steps, out_path, "GROUND TRUTH (optimal)", "V-JEPA (ours)")
+        return {"scene": target.tolist(),
+                "gt_final_dist": float(gt.steps[-1]["stats_dist"]),
+                "vjepa_final_dist": float(ours.steps[-1]["stats_dist"])}
+
+    # object tasks: fix the scene so GT and V-JEPA share the same cube position
+    cube_xy = _rand_cube_xy(ctx["rng"])
+    ctx["fixed_cube_xy"] = cube_xy
+    env.reset(cube_xy=cube_xy)
+    gt = TrialLogger(ctx["csv"], f"demo_{task}_gt", 0, ctx["fovy"], True)
+    (_gt_grasp if task == "grasp_lift" else _gt_pick_place)(env, gt)
+    ours = TrialLogger(ctx["csv"], f"demo_{task}_vjepa", 0, ctx["fovy"], True)
+    rec = TASKS[task](env, ctx, ours, args)
     side_by_side_gif(gt.steps, ours.steps, out_path,
-                     "GROUND TRUTH (optimal)", "V-JEPA (ours)")
-    return {"target": target.tolist(),
-            "gt_final_dist": float(gt.steps[-1]["stats_dist"]),
-            "vjepa_final_dist": float(ours.steps[-1]["stats_dist"])}
+                     "GROUND TRUTH (scripted expert)", "V-JEPA (ours)")
+    return {"scene": [round(float(x), 3) for x in cube_xy],
+            "vjepa_error": round(float(rec["error"]), 4), "vjepa_failure": rec["failure"] or "-",
+            "vjepa_gates": rec["gates"]}
 
 
 def _scripted_grasp(env, tlog):
@@ -622,7 +668,7 @@ def task_grasp_lift(env, ctx, tlog, args):
                   the cube) -- the paper's long-horizon staged approach for pick.
     In both, the goal images leave the cube UNCHANGED (only the arm moves), so no held-object
     render is needed for the grasp reach."""
-    cube_xy = _rand_cube_xy(ctx["rng"])
+    cube_xy = ctx.get("fixed_cube_xy") or _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     c = env.object_position()
     grasp_pos = np.array([c[0], c[1], c[2] + 0.005])    # at the cube, fingers around it, open
@@ -679,7 +725,7 @@ def task_place(env, ctx, tlog, args):
     open is scripted. Note: the final sub-goal keeps the cube HELD (low over the zone) rather than
     showing a gripper-away 'resting' goal, because V-JEPA controls the held EE and cannot drive the
     gripper away without dragging the cube -- a held-low goal is the reachable placement target."""
-    cube_xy = _rand_cube_xy(ctx["rng"])
+    cube_xy = ctx.get("fixed_cube_xy") or _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     _scripted_grasp(env, tlog)  # reliable grasp to isolate the PLACEMENT skill
     if not env.gripper_holds_object():
@@ -744,7 +790,7 @@ def task_pick_place(env, ctx, tlog, args):
     instead, consistent with our honest V-JEPA-does-spatial / scripted-does-gripper decomposition.
     Precision error = ||object_xy_final - zone_xy||. A grasp miss fails the whole task (honest
     composite)."""
-    cube_xy = _rand_cube_xy(ctx["rng"])
+    cube_xy = ctx.get("fixed_cube_xy") or _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     c = env.object_position()
     grasp_pos = np.array([c[0], c[1], c[2] + 0.005])  # at the cube, fingers around it, open
@@ -791,6 +837,7 @@ def task_pick_place(env, ctx, tlog, args):
     res = place_success(obj[:2], env.zone_center(), env.object_tilt(), env.object_speed(),
                         env.object_released(), spec)
     gates = {
+        "grasped": grasped,
         "upright": float(np.degrees(env.object_tilt())) < spec["tilt_max_deg"],
         "stable": float(env.object_speed()) < spec["v_settle"],
         "released": bool(env.object_released()),
@@ -842,11 +889,6 @@ def _pf(s):
 def _cm(t):
     """Format a metre threshold as a cm label (e.g. 0.015 -> '1.5', 0.05 -> '5')."""
     return f"{t * 100:g}"
-
-
-def success_at(error, gates, thr):
-    """A trial is a success at precision `thr` iff error < thr AND all physical gates hold."""
-    return bool(error < thr and all(gates.values()))
 
 
 def select_for_viz(records):
@@ -936,6 +978,10 @@ def main() -> None:
     p.add_argument("--tasks", nargs="+", default=["reach", "grasp_lift", "place"], choices=list(TASKS))
     p.add_argument("--trials", type=int, default=1, help="trials per task (smoke: 1-5; full: 50)")
     p.add_argument("--samples", type=int, default=200)
+    p.add_argument("--chunk", type=int, default=400,
+                   help="predictor sub-batch size over CEM samples (0/>=samples = whole batch); "
+                        "caps peak VRAM for samples=800 (mathematically identical, samples are "
+                        "independent). Default 400: 200/400 run whole-batch, 800 splits in two")
     p.add_argument("--cem-steps", type=int, default=10)
     p.add_argument("--rollout", type=int, default=2, help="CEM planning horizon T")
     p.add_argument("--topk", type=int, default=10)
@@ -965,7 +1011,7 @@ def main() -> None:
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=0, help="seed for per-trial randomized init")
     p.add_argument("--tag", default="full", help="report subdir: results/benchmarks/closed_loop_<tag>")
-    p.add_argument("--demo", choices=["reach"], default=None,
+    p.add_argument("--demo", choices=["reach", "grasp_lift", "place", "pick_place"], default=None,
                    help="build a side-by-side ground-truth vs V-JEPA comparison GIF for the given "
                         "task (reuses the loaded model) and exit, instead of running the benchmark")
     p.add_argument("--viz-only-selected", action="store_true", default=True,
@@ -1007,7 +1053,7 @@ def main() -> None:
         "checkpoint": os.path.relpath(CHECKPOINT, _REPO_ROOT), "checkpoint_sha256": _sha256(CHECKPOINT),
         "device": str(dev), "dtype": args.dtype,
         "cem": {"samples": args.samples, "cem_steps": args.cem_steps, "rollout_T": args.rollout,
-                "topk": args.topk, "maxnorm": args.maxnorm,
+                "topk": args.topk, "maxnorm": args.maxnorm, "chunk": args.chunk,
                 "momentum_mean": 0.15, "momentum_std": 0.15,
                 "objective": "mean-L1 in layer-norm'd latent, gripper axis frozen"},
         "tasks": args.tasks, "trials_per_task": args.trials, "seed": args.seed,
@@ -1055,19 +1101,20 @@ def main() -> None:
     if args.demo:
         demo_dir = os.path.join(_REPO_ROOT, "results", "benchmarks", "closed_loop_smoke")
         os.makedirs(demo_dir, exist_ok=True)
-        env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13)
+        needs_obj = args.demo in ("grasp_lift", "place", "pick_place")
+        env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
+                             add_object=needs_obj, add_zone=needs_obj)
+        seed = args.seed * 100003 + TASK_SEED_OFFSET[args.demo]
         ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                "csv": csv, "fovy": float(env.model.vis.global_.fovy),
-               "rng": np.random.default_rng(args.seed * 100003 + TASK_SEED_OFFSET["reach"]),
+               "rng": np.random.default_rng(seed),
                "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                               dev=dev, autocast_dtype=autocast_dtype)}
         out = os.path.join(demo_dir, f"demo_{args.demo}_compare.gif")
-        torch.manual_seed(args.seed * 100003 + TASK_SEED_OFFSET["reach"])
+        torch.manual_seed(seed)
         info = run_demo(env, ctx, args, out)
         env.close()
-        logger.info("demo GIF -> %s | target=%s | GT final %.3f m vs V-JEPA final %.3f m",
-                    os.path.relpath(out, _REPO_ROOT), np.round(info["target"], 3),
-                    info["gt_final_dist"], info["vjepa_final_dist"])
+        logger.info("demo GIF -> %s | %s", os.path.relpath(out, _REPO_ROOT), json.dumps(info))
         return
 
     trial_csv = clog.CSVLogger(
