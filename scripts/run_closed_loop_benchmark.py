@@ -38,7 +38,9 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -351,7 +353,7 @@ def make_planner(cem, compute_new_pose, predictor, tokens_per_frame, args, dev, 
             return cem(context_frame=z_ctx, context_pose=s_ctx, goal_frame=z_goal,
                        world_model=step_predictor, rollout=args.rollout, samples=args.samples,
                        cem_steps=args.cem_steps, topk=args.topk, maxnorm=args.maxnorm,
-                       axis={3: 0.0}, momentum_mean=0.15, momentum_std=0.75,
+                       axis={3: 0.0}, momentum_mean=0.15, momentum_std=0.15,
                        momentum_mean_gripper=0.15, momentum_std_gripper=0.15)
 
     return step_predictor, plan
@@ -421,6 +423,33 @@ def scripted(env, tlog, phase, target, gripper=None, dz=None, settle=0, n=4):
                 target if target is not None else None, float("nan"), float("nan"))
 
 
+# ----------------------------------------------------------------------------- stage abstraction
+@dataclass
+class Stage:
+    """One V-JEPA closed-loop sub-goal. ``goal_fn(env, ctx) -> (goal_img, target_xyz)`` lazily
+    builds the goal image (previewed just before the stage runs, so sequential sub-goals see the
+    current state); ``max_steps`` is this stage's CEM budget. Multiple stages express the paper's
+    long-horizon sub-goal schedule (e.g. pregrasp -> grasp, or place-vicinity -> place-final);
+    a single stage is the single-goal protocol. ``name`` must start with ``vjepa`` so step/energy
+    accounting picks it up."""
+    name: str
+    goal_fn: Callable
+    max_steps: int
+
+
+def run_vjepa_stages(env, ctx, tlog, stages, args) -> Optional[np.ndarray]:
+    """Run a sequence of V-JEPA sub-goals with single-goal CEM per stage, swapping the goal image
+    between stages (this is how the released single-``goal_frame`` CEM realizes multi-sub-goal
+    planning). Returns the final stage's target xyz (used by reach for its error)."""
+    target = None
+    for st in stages:
+        goal_img, target = st.goal_fn(env, ctx)
+        z_goal = ctx["encode_goal"](goal_img)
+        cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, target, tlog,
+                    st.name, st.max_steps, args.pos_tol, **ctx["cem_kw"])
+    return target
+
+
 # ----------------------------------------------------------------------------- tasks
 # Precision-curve thresholds (metres): success is evaluated at MANY thresholds from one rollout
 # (the recorded continuous error), so we get a precision curve instead of one arbitrary cutoff.
@@ -446,16 +475,18 @@ def _rand_cube_xy(rng):
 
 
 def task_reach(env, ctx, tlog, args):
+    """Pure V-JEPA closed-loop to a goal image (identical under both protocols: a single stage)."""
     rng = ctx["rng"]
     env.reset()
     home = env.get_ee_state()[:3].copy()
     target = home + np.array([float(rng.uniform(0.06, 0.12)), float(rng.uniform(-0.10, 0.02)),
                               float(rng.uniform(-0.08, -0.02))])
-    goal_img = env.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning")
-    z_goal = ctx["encode_goal"](goal_img)
     env.reset()
-    steps, dist = cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, target, tlog,
-                              "vjepa_reach", args.reach_steps, args.pos_tol, **ctx["cem_kw"])
+
+    def reach_goal(e, ctx):
+        return e.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning"), target
+
+    run_vjepa_stages(env, ctx, tlog, [Stage("vjepa_reach", reach_goal, args.reach_steps)], args)
     error = float(np.linalg.norm(env.get_ee_state()[:3] - target))
     res = reach_success(env.get_ee_state()[:3], target, tau_reach=max(THRESHOLDS["reach"]))
     tlog.record(env, "final", None, None, float("nan"), target, float("nan"), error,
@@ -481,22 +512,39 @@ def _scripted_grasp(env, tlog):
 
 
 def task_grasp_lift(env, ctx, tlog, args):
-    """V-JEPA must REACH the grasp pose (goal image = the arm at the cube, grasp-ready). Only the
-    close + lift are scripted -- no privileged re-centering -- so the metrics reflect V-JEPA's own
-    grasp-positioning ability. Precision error = ||object_xy - EE_xy|| BEFORE the close."""
+    """V-JEPA must REACH the grasp pose; only close + lift are scripted -- no privileged
+    re-centering -- so the metrics reflect V-JEPA's own grasp-positioning. Precision error =
+    ||object_xy - EE_xy|| BEFORE the close.
+
+    single_goal:  one grasp sub-goal (goal = arm around the cube, gripper open).
+    multistage:   pregrasp sub-goal (arm hovering above the cube) -> grasp sub-goal (arm around
+                  the cube) -- the paper's long-horizon staged approach for pick.
+    In both, the goal images leave the cube UNCHANGED (only the arm moves), so no held-object
+    render is needed for the grasp reach."""
     cube_xy = _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     c = env.object_position()
-    grasp_pos = np.array([c[0], c[1], c[2] + 0.005])  # AT the cube (fingers around it), open
-    goal_img = env.capture_goal_image(pos=grasp_pos, euler=EE_DOWN, gripper=0.0, camera="planning")
-    z_goal = ctx["encode_goal"](goal_img)
-    env.reset(cube_xy=cube_xy)
-    # 1) V-JEPA closed-loop reach to the grasp pose (gripper frozen open the whole way)
-    cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, grasp_pos, tlog,
-                "vjepa_reach", args.grasp_steps, args.pos_tol, **ctx["cem_kw"])
+    grasp_pos = np.array([c[0], c[1], c[2] + 0.005])    # at the cube, fingers around it, open
+    pregrasp_pos = np.array([c[0], c[1], c[2] + 0.10])  # hovering above the cube
+
+    def grasp_goal(e, ctx):
+        return e.capture_goal_image(pos=grasp_pos, euler=EE_DOWN, gripper=0.0,
+                                    camera="planning"), grasp_pos
+
+    def pregrasp_goal(e, ctx):
+        return e.capture_goal_image(pos=pregrasp_pos, euler=EE_DOWN, gripper=0.0,
+                                    camera="planning"), pregrasp_pos
+
+    if args.protocol == "multistage":
+        stages = [Stage("vjepa_pregrasp", pregrasp_goal, args.pregrasp_steps),
+                  Stage("vjepa_grasp", grasp_goal, args.grasp_steps)]
+    else:
+        stages = [Stage("vjepa_grasp", grasp_goal, args.grasp_steps)]
+    run_vjepa_stages(env, ctx, tlog, stages, args)
+
     # precision error: how well V-JEPA positioned the gripper over the object BEFORE the close
     grasp_xy_error = float(np.linalg.norm(env.object_position()[:2] - env.get_ee_state()[:2]))
-    # 2) ONLY scripted: close (holding the pose V-JEPA reached) then lift -- no re-centering.
+    # ONLY scripted from here: close (holding the pose V-JEPA reached) then lift -- no re-centering.
     obj_z0 = float(env.object_position()[2])
     scripted(env, tlog, "close", None, gripper=1.0)
     scripted(env, tlog, "lift", None, dz=0.12)
@@ -521,7 +569,15 @@ def task_place(env, ctx, tlog, args):
     """Start holding the cube via the reliable scripted grasp, then V-JEPA must DRIVE the held cube
     over the zone. The final descent is straight DOWN at whatever xy V-JEPA reached (no scripted
     move-to-zone-center), so placement error = ||object_xy_final - zone_xy|| reflects V-JEPA's own
-    horizontal accuracy."""
+    horizontal accuracy.
+
+    single_goal:  one place sub-goal (held cube hovering over the zone).
+    multistage:   place-vicinity sub-goal (held cube high over the zone) -> place-final sub-goal
+                  (held cube lowered onto the zone) -- the paper's vicinity-then-place schedule.
+    Both sub-goals render the CUBE carried in the gripper (held_object=True); the release lower +
+    open is scripted. Note: the final sub-goal keeps the cube HELD (low over the zone) rather than
+    showing a gripper-away 'resting' goal, because V-JEPA controls the held EE and cannot drive the
+    gripper away without dragging the cube -- a held-low goal is the reachable placement target."""
     cube_xy = _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     _scripted_grasp(env, tlog)  # reliable grasp to isolate the PLACEMENT skill
@@ -531,13 +587,25 @@ def task_place(env, ctx, tlog, args):
                     success=0, failure="grasp_failed_pre_place")
         return {"error": err, "gates": {g: False for g in GATE_SPEC["place"]},
                 "failure": "grasp_failed_pre_place", "metrics": {}}
-    # V-JEPA reach: drive the held cube to a hover over the zone
     zone = env.zone_center()
-    place_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.12])
-    goal_img = env.capture_goal_image(pos=place_pos, euler=EE_DOWN, gripper=1.0, camera="planning")
-    z_goal = ctx["encode_goal"](goal_img)
-    cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, place_pos, tlog,
-                "vjepa_place", args.place_steps, args.pos_tol, **ctx["cem_kw"])
+    hover_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.12])  # vicinity (high)
+    low_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.04])    # final (lowered)
+
+    def hover_goal(e, ctx):
+        return e.capture_goal_image(pos=hover_pos, euler=EE_DOWN, gripper=1.0,
+                                    camera="planning", held_object=True), hover_pos
+
+    def low_goal(e, ctx):
+        return e.capture_goal_image(pos=low_pos, euler=EE_DOWN, gripper=1.0,
+                                    camera="planning", held_object=True), low_pos
+
+    if args.protocol == "multistage":
+        stages = [Stage("vjepa_place_vicinity", hover_goal, args.vicinity_steps),
+                  Stage("vjepa_place_final", low_goal, args.place_steps)]
+    else:
+        stages = [Stage("vjepa_place", hover_goal, args.place_steps)]
+    run_vjepa_stages(env, ctx, tlog, stages, args)
+
     # scripted release: lower STRAIGHT DOWN at V-JEPA's reached xy (no move-to-zone-center), open
     cur = env.get_ee_state()[:3]
     scripted(env, tlog, "lower", [cur[0], cur[1], TABLE_TOP_Z + CUBE_HALF + 0.02])
@@ -553,7 +621,7 @@ def task_place(env, ctx, tlog, args):
         "stable": float(env.object_speed()) < spec["v_settle"],
         "released": bool(env.object_released()),
     }
-    tlog.record(env, "final", None, None, float("nan"), place_pos, float("nan"), place_xy_error,
+    tlog.record(env, "final", None, None, float("nan"), low_pos, float("nan"), place_xy_error,
                 success=int(res.success), failure=res.failure_type or "")
     return {"error": place_xy_error, "gates": gates, "failure": res.failure_type or "",
             "metrics": res.metrics}
@@ -691,9 +759,19 @@ def main() -> None:
     p.add_argument("--rollout", type=int, default=2, help="CEM planning horizon T")
     p.add_argument("--topk", type=int, default=10)
     p.add_argument("--maxnorm", type=float, default=0.05, help="CEM per-axis action clip (m)")
-    p.add_argument("--pos-tol", type=float, default=0.03, help="reached if EE within this of goal (m)")
+    p.add_argument("--pos-tol", type=float, default=0.015,
+                   help="early-stop the CEM loop when EE is within this of the goal (m); set to the "
+                        "tightest precision threshold so the loop does not quit before the strictest "
+                        "success cutoff can be measured")
+    p.add_argument("--protocol", choices=["single_goal", "multistage"], default="single_goal",
+                   help="single_goal: one goal image per task (baseline). multistage: paper-like "
+                        "sub-goal schedule (grasp: pregrasp->grasp; place: vicinity->final)")
     p.add_argument("--reach-steps", type=int, default=5)
+    p.add_argument("--pregrasp-steps", type=int, default=3,
+                   help="multistage grasp: CEM budget for the pregrasp (hover) sub-goal")
     p.add_argument("--grasp-steps", type=int, default=6)
+    p.add_argument("--vicinity-steps", type=int, default=6,
+                   help="multistage place: CEM budget for the vicinity (high hover) sub-goal")
     p.add_argument("--place-steps", type=int, default=8)
     p.add_argument("--dtype", choices=["fp32", "bf16"], default="bf16")
     p.add_argument("--device", default="cuda")
@@ -738,11 +816,14 @@ def main() -> None:
         "checkpoint": os.path.relpath(CHECKPOINT, _REPO_ROOT), "checkpoint_sha256": _sha256(CHECKPOINT),
         "device": str(dev), "dtype": args.dtype,
         "cem": {"samples": args.samples, "cem_steps": args.cem_steps, "rollout_T": args.rollout,
-                "topk": args.topk, "maxnorm": args.maxnorm, "momentum_mean": 0.15,
+                "topk": args.topk, "maxnorm": args.maxnorm,
+                "momentum_mean": 0.15, "momentum_std": 0.15,
                 "objective": "mean-L1 in layer-norm'd latent, gripper axis frozen"},
         "tasks": args.tasks, "trials_per_task": args.trials, "seed": args.seed,
+        "protocol": args.protocol,
         "pos_tol": args.pos_tol,
-        "max_vjepa_steps": {"reach": args.reach_steps, "grasp_lift": args.grasp_steps,
+        "max_vjepa_steps": {"reach": args.reach_steps, "pregrasp": args.pregrasp_steps,
+                            "grasp": args.grasp_steps, "place_vicinity": args.vicinity_steps,
                             "place": args.place_steps},
         "thresholds_m": THRESHOLDS, "gate_spec": GATE_SPEC,
         "env": {"embodiment": "Franka Panda + Robotiq 2F-85 (FrankaDroidEnv)",
@@ -758,8 +839,9 @@ def main() -> None:
         json.dump(config, f, indent=2)
 
     logger.info("=" * 64)
-    logger.info("closed-loop benchmark | tasks=%s trials=%d | samples=%d cem_steps=%d T=%d maxnorm=%.3f",
-                args.tasks, args.trials, args.samples, args.cem_steps, args.rollout, args.maxnorm)
+    logger.info("closed-loop benchmark | protocol=%s tasks=%s trials=%d | samples=%d cem_steps=%d "
+                "T=%d maxnorm=%.3f", args.protocol, args.tasks, args.trials, args.samples,
+                args.cem_steps, args.rollout, args.maxnorm)
     logger.info("run_id=%s | run_log=%s | report=%s", run_id,
                 os.path.relpath(run_dir, _REPO_ROOT), os.path.relpath(report_dir, _REPO_ROOT))
     logger.info("=" * 64)
@@ -874,9 +956,10 @@ def _write_summary(report_dir, run_id, config, summaries, args):
     lines = [
         f"# Closed-loop benchmark -- run {run_id}",
         "",
-        f"Config: model **{config['model']}**, samples **{args.samples}**, cem_steps "
-        f"**{args.cem_steps}**, rollout **T={args.rollout}**, topk **{args.topk}**, maxnorm "
-        f"**{args.maxnorm} m**, dtype **{args.dtype}**, **{args.trials} trials/task**, seed {args.seed}.",
+        f"Config: model **{config['model']}**, protocol **{args.protocol}**, samples "
+        f"**{args.samples}**, cem_steps **{args.cem_steps}**, rollout **T={args.rollout}**, topk "
+        f"**{args.topk}**, maxnorm **{args.maxnorm} m**, dtype **{args.dtype}**, "
+        f"**{args.trials} trials/task**, seed {args.seed}.",
         f"Commit `{config['git_commit'][:10]}`. Success = error < threshold AND physical gates "
         "(lifted/held/upright/stable/released), judged from hidden MuJoCo truth. Cube/target "
         "positions randomized per trial.",

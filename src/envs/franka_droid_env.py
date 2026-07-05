@@ -341,25 +341,48 @@ class FrankaDroidEnv:
 
     def capture_goal_image(self, pos=None, euler=None, gripper=None,
                            camera: Optional[str] = None,
-                           settle_steps: int = GRIPPER_SETTLE_STEPS) -> np.ndarray:
+                           settle_steps: int = GRIPPER_SETTLE_STEPS,
+                           held_object: bool = False) -> np.ndarray:
         """Render a hypothetical goal pose without disturbing the live state.
 
         The arm is teleported kinematically, but the gripper is a driven linkage whose
         finger pose is not set by ``mj_forward`` alone, so when a gripper opening is
         requested the physics is stepped briefly (arm held by its servos) to let the fingers
         reach the commanded opening -- otherwise open vs closed goals would render alike.
+
+        ``held_object=True`` renders a *held-object* goal: ``set_ee_pose`` moves only the arm,
+        not the cube's free joint, so a naive held goal would leave the cube behind at its grasp
+        site. We capture the cube's rigid pose in the EE frame first, then carry it with the
+        gripper to the goal pose, so the goal image shows the cube in the gripper (e.g. the held
+        cube hovering over the place zone), which is the correct planning target.
         """
         saved_qpos = self.data.qpos.copy()
         saved_qvel = self.data.qvel.copy()
         saved_ctrl = self.data.ctrl.copy()
         saved_grip = self._gripper_cmd
         saved_time = self.data.time
+        carry = None
+        if held_object and self._cube_qadr >= 0:
+            ee0_pos, ee0_quat = self._ee_pos_quat()
+            obj0 = self.object_pose()
+            rel_pos = geo.quat_to_mat(ee0_quat).T @ (obj0[:3] - ee0_pos)  # object in EE frame
+            ee0_conj = np.array([ee0_quat[0], -ee0_quat[1], -ee0_quat[2], -ee0_quat[3]])
+            rel_quat = geo.quat_mul(ee0_conj, obj0[3:])
+            carry = (rel_pos, rel_quat)
         try:
             self.set_ee_pose(pos=pos, euler=euler, gripper=gripper)
             if gripper is not None and settle_steps:
                 self.data.qvel[:] = 0.0
                 for _ in range(int(settle_steps)):
                     self._mujoco.mj_step(self.model, self.data)
+            if carry is not None:
+                ee1_pos, ee1_quat = self._ee_pos_quat()
+                obj_pos = ee1_pos + geo.quat_to_mat(ee1_quat) @ carry[0]
+                obj_quat = geo.quat_normalize(geo.quat_mul(ee1_quat, carry[1]))
+                self.data.qpos[self._cube_qadr:self._cube_qadr + 3] = obj_pos
+                self.data.qpos[self._cube_qadr + 3:self._cube_qadr + 7] = obj_quat
+                self.data.qvel[:] = 0.0
+                self._mujoco.mj_forward(self.model, self.data)
             return self.render(camera=camera)
         finally:
             self.data.qpos[:] = saved_qpos
