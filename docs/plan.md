@@ -35,16 +35,18 @@ Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows
 *task* sources (#11/#19); DROID gives the real-robot *transition* baseline. The plan is
 benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
-1. **W* calibration + re-run Phase 1.** Fit/freeze the App. B.4 horizontal rotation for the
-   planning camera and re-run the CEM chain; expect the lateral sub-goal to converge -- the first
-   improvement delta on our own closed-loop benchmark.
-2. **FrankaDroidEnv closed-loop pick/place.** Extend `cem_reach_loop.py` with gripper sub-goals
-   (reach -> close -> lift -> move -> open) on a graspable-object scene; the Windows-runnable
-   closed-loop success benchmark (ManiSkill/robosuite need Linux/WSL2).
-3. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
-   task data; re-run benchmark 1 (same n/H/K/seed) + Phase 1 and report improvement as metric
-   deltas vs the DROID baseline (rank 0.820, top1 0.320).
-4. **ManiSkill (benchmark 2, Linux/WSL2).** Adapter render -> V-JEPA latent -> Phase-1 CEM loop ->
+1. **Run the full 50-trial precision-curve benchmark** (after code review). The fire-ready runner
+   (`scripts/run_closed_loop_benchmark.py --trials 50`) records a continuous error per trial and
+   computes success at many thresholds (Reach 5/3/1.5cm, Grasp 6/5/3/2cm, Place 10/6/3/1.5cm) with
+   plots + full run-logging. Smoke (5/task): **Reach 5/5, Grasp 3/5, Place 0/5** — place plateaus
+   ~15 cm vs the 6 cm zone (`docs/experiments/closed_loop_benchmark.md`).
+2. **W* calibration + re-run.** Fit/freeze the App. B.4 horizontal rotation for the planning
+   camera and re-run the benchmark; expect grasp/place error to drop -- the first improvement delta.
+3. **FrankaDroidEnv closed-loop pick/place** — DONE (Reach/Grasp/Place runner + hidden success).
+4. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
+   task data; re-run benchmark 1 (same n/H/K/seed) + the closed-loop benchmark (same protocol) and
+   report improvement as metric deltas vs the vanilla baselines.
+5. **ManiSkill (benchmark 2, Linux/WSL2).** Adapter render -> V-JEPA latent -> CEM loop ->
    step -> official success on PickCube / StackCube / PegInsertionSide (gated on a Linux env).
 5. **Confidence-gate data.** Perturb the start pose, plan, log terminal energy + confound
    baselines + success label (the project's central gate measurement).
