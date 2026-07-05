@@ -28,8 +28,12 @@ per trial (seeded).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
+import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -220,12 +224,14 @@ def snapshot(env, has_object):
 
 
 class TrialLogger:
-    """Accumulates per-step CSV rows and annotated frames for one trial."""
+    """Logs per-step CSV rows for one trial and stores lightweight per-step data (raw image +
+    marker pixels + stats) so annotated panels can be built ON DEMAND -- only for the few trials
+    selected for GIFs, keeping a 50-trial run memory-light."""
 
     def __init__(self, csv, task, trial, fovy, has_object):
         self.csv, self.task, self.trial, self.fovy, self.has_object = csv, task, trial, fovy, has_object
-        self.frames = []
-        self.rows = []  # per-step dicts for the markdown frame table
+        self.steps = []  # per-step dicts: img + projected markers + stats panel (for GIF/contact)
+        self.rows = []   # compact per-step dicts for the markdown frame table
         self.step = 0
 
     def record(self, env, phase, action, realized, energy, target, cem_time,
@@ -269,7 +275,8 @@ class TrialLogger:
             "held": held, "released": released,
             "cem_time_s": _fmt(cem_time), "success": success, "failure": failure,
         }
-        self.frames.append(render_panel(img, obj_px, ee_px, zone_px, zone_r_px or 4.0, stats))
+        self.steps.append({"img": img, "obj_px": obj_px, "ee_px": ee_px,
+                           "zone_px": zone_px, "zone_r_px": zone_r_px or 4.0, "stats": stats})
         self.rows.append({
             "step": self.step, "phase": phase, "energy": _fmt(energy),
             "dist_goal": _fmt(dist_goal), "obj_dz": _fmt(obj_dz), "tilt": _fmt(tilt),
@@ -277,14 +284,24 @@ class TrialLogger:
         })
         self.step += 1
 
-    def write_markdown(self, path, result, dt):
+    def build_frames(self):
+        """Build the annotated panels for this trial (only called for selected/visualized trials)."""
+        return [render_panel(s["img"], s["obj_px"], s["ee_px"], s["zone_px"], s["zone_r_px"],
+                             s["stats"]) for s in self.steps]
+
+    @property
+    def phases(self):
+        return [r["phase"] for r in self.rows]
+
+    def write_markdown(self, path, record, dt):
         """A readable per-step frame table (audit-friendly, unlike the compressed contact sheet)."""
         vjepa = [r for r in self.rows if str(r["phase"]).startswith("vjepa")]
         lines = [
             f"# {self.task} trial {self.trial}",
             "",
-            f"- **success**: {result.success}  |  **failure**: {result.failure_type or '-'}",
-            f"- **metrics**: {result.metrics}",
+            f"- **error**: {record['error']:.4f} m  |  **failure**: {record['failure'] or '-'}",
+            f"- **gates**: {record['gates']}",
+            f"- **metrics**: {record['metrics']}",
             f"- V-JEPA closed-loop steps: {len(vjepa)}; total steps: {len(self.rows)}; wall {dt:.1f}s",
             "",
             "| step | phase | energy | dist_goal | obj_dz | tilt | speed | held | rel | cem_s |",
@@ -403,6 +420,21 @@ def scripted(env, tlog, phase, target, gripper=None, dz=None, settle=0, n=4):
 
 
 # ----------------------------------------------------------------------------- tasks
+# Precision-curve thresholds (metres): success is evaluated at MANY thresholds from one rollout
+# (the recorded continuous error), so we get a precision curve instead of one arbitrary cutoff.
+THRESHOLDS = {
+    "reach": [0.05, 0.03, 0.015],
+    "grasp_lift": [0.06, 0.05, 0.03, 0.02],
+    "place": [0.10, 0.06, 0.03, 0.015],
+}
+# The physical gates that must ALSO hold (beyond the precision threshold) for a real success.
+GATE_SPEC = {
+    "reach": [],
+    "grasp_lift": ["lifted", "held", "upright", "stable"],
+    "place": ["upright", "stable", "released"],
+}
+
+
 def _rand_cube_xy(rng):
     """A randomized, reachable cube start on the table (around CUBE_START)."""
     return (float(rng.uniform(0.45, 0.55)), float(rng.uniform(-0.15, -0.05)))
@@ -419,10 +451,11 @@ def task_reach(env, ctx, tlog, args):
     env.reset()
     steps, dist = cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, target, tlog,
                               "vjepa_reach", args.reach_steps, args.pos_tol, **ctx["cem_kw"])
-    res = reach_success(env.get_ee_state()[:3], target, tau_reach=args.reach_tau)
-    tlog.record(env, "final", None, None, float("nan"), target, float("nan"), dist,
+    error = float(np.linalg.norm(env.get_ee_state()[:3] - target))
+    res = reach_success(env.get_ee_state()[:3], target, tau_reach=max(THRESHOLDS["reach"]))
+    tlog.record(env, "final", None, None, float("nan"), target, float("nan"), error,
                 success=int(res.success), failure=res.failure_type or "")
-    return res
+    return {"error": error, "gates": {}, "failure": res.failure_type or "", "metrics": res.metrics}
 
 
 def _scripted_grasp(env, tlog):
@@ -444,8 +477,8 @@ def _scripted_grasp(env, tlog):
 
 def task_grasp_lift(env, ctx, tlog, args):
     """V-JEPA must REACH the grasp pose (goal image = the arm at the cube, grasp-ready). Only the
-    close + lift are scripted -- no privileged re-centering -- so the success rate reflects
-    V-JEPA's own grasp-positioning ability."""
+    close + lift are scripted -- no privileged re-centering -- so the metrics reflect V-JEPA's own
+    grasp-positioning ability. Precision error = ||object_xy - EE_xy|| BEFORE the close."""
     cube_xy = _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     c = env.object_position()
@@ -456,33 +489,43 @@ def task_grasp_lift(env, ctx, tlog, args):
     # 1) V-JEPA closed-loop reach to the grasp pose (gripper frozen open the whole way)
     cem_to_goal(env, ctx["encoder"], ctx["plan"], z_goal, grasp_pos, tlog,
                 "vjepa_reach", args.grasp_steps, args.pos_tol, **ctx["cem_kw"])
+    # precision error: how well V-JEPA positioned the gripper over the object BEFORE the close
+    grasp_xy_error = float(np.linalg.norm(env.object_position()[:2] - env.get_ee_state()[:2]))
     # 2) ONLY scripted: close (holding the pose V-JEPA reached) then lift -- no re-centering.
     obj_z0 = float(env.object_position()[2])
     scripted(env, tlog, "close", None, gripper=1.0)
     scripted(env, tlog, "lift", None, dz=0.12)
     scripted(env, tlog, "settle", None, settle=20)
     obj = env.object_position()
+    spec = SUCCESS_DEFAULTS["grasp_lift"]
     res = grasp_lift_success(obj_z0, float(obj[2]), env.get_ee_state()[:2], obj[:2],
-                             env.object_tilt(), env.object_speed(), env.gripper_holds_object(),
-                             SUCCESS_DEFAULTS["grasp_lift"])
-    tlog.record(env, "final", None, None, float("nan"), grasp_pos, float("nan"), float("nan"),
+                             env.object_tilt(), env.object_speed(), env.gripper_holds_object(), spec)
+    gates = {
+        "lifted": float(obj[2] - obj_z0) > spec["lift_dz"],
+        "held": bool(env.gripper_holds_object()),
+        "upright": float(np.degrees(env.object_tilt())) < spec["tilt_max_deg"],
+        "stable": float(env.object_speed()) < spec["v_settle"],
+    }
+    tlog.record(env, "final", None, None, float("nan"), grasp_pos, float("nan"), grasp_xy_error,
                 success=int(res.success), failure=res.failure_type or "")
-    return res
+    return {"error": grasp_xy_error, "gates": gates, "failure": res.failure_type or "",
+            "metrics": res.metrics}
 
 
 def task_place(env, ctx, tlog, args):
     """Start holding the cube via the reliable scripted grasp, then V-JEPA must DRIVE the held cube
     over the zone. The final descent is straight DOWN at whatever xy V-JEPA reached (no scripted
-    move-to-zone-center), so placement success reflects V-JEPA's own horizontal accuracy."""
+    move-to-zone-center), so placement error = ||object_xy_final - zone_xy|| reflects V-JEPA's own
+    horizontal accuracy."""
     cube_xy = _rand_cube_xy(ctx["rng"])
     env.reset(cube_xy=cube_xy)
     _scripted_grasp(env, tlog)  # reliable grasp to isolate the PLACEMENT skill
     if not env.gripper_holds_object():
-        res = place_success(env.object_position()[:2], env.zone_center(), env.object_tilt(),
-                            env.object_speed(), env.object_released(), SUCCESS_DEFAULTS["place"])
-        tlog.record(env, "final", None, None, float("nan"), None, float("nan"), float("nan"),
-                    success=int(res.success), failure="grasp_failed_pre_place")
-        return res
+        err = float(np.linalg.norm(env.object_position()[:2] - env.zone_center()))
+        tlog.record(env, "final", None, None, float("nan"), None, float("nan"), err,
+                    success=0, failure="grasp_failed_pre_place")
+        return {"error": err, "gates": {g: False for g in GATE_SPEC["place"]},
+                "failure": "grasp_failed_pre_place", "metrics": {}}
     # V-JEPA reach: drive the held cube to a hover over the zone
     zone = env.zone_center()
     place_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + CUBE_HALF + 0.12])
@@ -496,14 +539,137 @@ def task_place(env, ctx, tlog, args):
     scripted(env, tlog, "open", None, gripper=-1.0)
     scripted(env, tlog, "settle", None, settle=30)
     obj = env.object_position()
+    place_xy_error = float(np.linalg.norm(obj[:2] - env.zone_center()))
+    spec = SUCCESS_DEFAULTS["place"]
     res = place_success(obj[:2], env.zone_center(), env.object_tilt(), env.object_speed(),
-                        env.object_released(), SUCCESS_DEFAULTS["place"])
-    tlog.record(env, "final", None, None, float("nan"), place_pos, float("nan"), float("nan"),
+                        env.object_released(), spec)
+    gates = {
+        "upright": float(np.degrees(env.object_tilt())) < spec["tilt_max_deg"],
+        "stable": float(env.object_speed()) < spec["v_settle"],
+        "released": bool(env.object_released()),
+    }
+    tlog.record(env, "final", None, None, float("nan"), place_pos, float("nan"), place_xy_error,
                 success=int(res.success), failure=res.failure_type or "")
-    return res
+    return {"error": place_xy_error, "gates": gates, "failure": res.failure_type or "",
+            "metrics": res.metrics}
 
 
 TASKS = {"reach": task_reach, "grasp_lift": task_grasp_lift, "place": task_place}
+
+
+# ----------------------------------------------------------------------------- summary / provenance
+def _sha256(path):
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for blk in iter(lambda: f.read(1 << 20), b""):
+                h.update(blk)
+        return h.hexdigest()
+    except OSError:
+        return ""
+
+
+def _git_commit():
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT,
+                                       stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return ""
+
+
+def _pf(s):
+    """Parse a formatted stat string (e.g. '+0.1234' or '-') to float or None."""
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cm(t):
+    """Format a metre threshold as a cm label (e.g. 0.015 -> '1.5', 0.05 -> '5')."""
+    return f"{t * 100:g}"
+
+
+def success_at(error, gates, thr):
+    """A trial is a success at precision `thr` iff error < thr AND all physical gates hold."""
+    return bool(error < thr and all(gates.values()))
+
+
+def select_for_viz(records):
+    """Indices of ~3 best, ~3 median, ~3 worst trials by error (deduplicated), for GIFs."""
+    order = sorted(range(len(records)), key=lambda i: records[i]["error"])
+    n = len(order)
+    if n <= 9:
+        return order
+    mid = n // 2
+    picks = order[:3] + order[mid - 1:mid + 2] + order[-3:]
+    return sorted(set(picks))
+
+
+def summarize_task(records, task):
+    errs = np.array([r["error"] for r in records], dtype=float)
+    fails = {}
+    for r in records:
+        if not r["all_success"]:
+            fails[r["failure"] or "unknown"] = fails.get(r["failure"] or "unknown", 0) + 1
+    row = {
+        "task": task, "n": len(records),
+        "mean_err": float(errs.mean()), "median_err": float(np.median(errs)),
+        "p75_err": float(np.percentile(errs, 75)), "p90_err": float(np.percentile(errs, 90)),
+        "mean_steps": float(np.mean([r["total_steps"] for r in records])),
+        "mean_vjepa_steps": float(np.mean([r["vjepa_steps"] for r in records])),
+        "mean_cem_s": float(np.nanmean([r["mean_cem_s"] for r in records])),
+        "failures": fails,
+    }
+    for thr in THRESHOLDS[task]:
+        row[f"succ@{thr}"] = float(np.mean([success_at(r["error"], r["gates"], thr)
+                                            for r in records]))
+    return row
+
+
+def write_task_plots(records, task, path):
+    errs = np.array([r["error"] for r in records], dtype=float)
+    thrs = THRESHOLDS[task]
+    rates = [np.mean([success_at(r["error"], r["gates"], t) for r in records]) for t in thrs]
+    fails = {}
+    for r in records:
+        if not r["all_success"]:
+            fails[r["failure"] or "unknown"] = fails.get(r["failure"] or "unknown", 0) + 1
+    energies = [r["final_energy"] for r in records if r["final_energy"] is not None]
+    energy_err = [(r["final_energy"], r["error"]) for r in records if r["final_energy"] is not None]
+
+    fig, ax = plt.subplots(2, 2, figsize=(11, 8))
+    ax[0, 0].hist(errs * 100, bins=15, color="#3b7dd8", edgecolor="white")
+    ax[0, 0].set_xlabel("final error (cm)")
+    ax[0, 0].set_ylabel("trials")
+    ax[0, 0].set_title(f"{task}: error distribution (n={len(records)})")
+
+    ax[0, 1].plot([t * 100 for t in thrs], [r * 100 for r in rates], "o-", color="#d1495b")
+    for t, r in zip(thrs, rates):
+        ax[0, 1].annotate(f"{r*100:.0f}%", (t * 100, r * 100), fontsize=8,
+                          textcoords="offset points", xytext=(0, 6))
+    ax[0, 1].set_xlabel("precision threshold (cm)")
+    ax[0, 1].set_ylabel("success rate (%)")
+    ax[0, 1].set_ylim(-5, 105)
+    ax[0, 1].set_title("success vs threshold (precision curve)")
+
+    if fails:
+        ax[1, 0].bar(list(fails.keys()), list(fails.values()), color="#e08a3c")
+        ax[1, 0].set_ylabel("count")
+        ax[1, 0].tick_params(axis="x", rotation=30, labelsize=8)
+    ax[1, 0].set_title("failure types")
+
+    if energy_err:
+        e, er = zip(*energy_err)
+        ax[1, 1].scatter(e, [x * 100 for x in er], color="#5a5a5a", alpha=0.7)
+        ax[1, 1].set_xlabel("final latent energy")
+        ax[1, 1].set_ylabel("final error (cm)")
+    ax[1, 1].set_title("error vs final latent energy")
+
+    fig.suptitle(f"Closed-loop benchmark -- {task}", fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
 
 
 # ----------------------------------------------------------------------------- main
@@ -514,20 +680,22 @@ def main() -> None:
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--tasks", nargs="+", default=["reach", "grasp_lift", "place"], choices=list(TASKS))
-    p.add_argument("--trials", type=int, default=1, help="trials per task (smoke: 1; real smoke: 3-5)")
+    p.add_argument("--trials", type=int, default=1, help="trials per task (smoke: 1-5; full: 50)")
     p.add_argument("--samples", type=int, default=200)
     p.add_argument("--cem-steps", type=int, default=10)
     p.add_argument("--rollout", type=int, default=2, help="CEM planning horizon T")
     p.add_argument("--topk", type=int, default=10)
     p.add_argument("--maxnorm", type=float, default=0.05, help="CEM per-axis action clip (m)")
     p.add_argument("--pos-tol", type=float, default=0.03, help="reached if EE within this of goal (m)")
-    p.add_argument("--reach-tau", type=float, default=0.05, help="reach success threshold (m)")
     p.add_argument("--reach-steps", type=int, default=5)
     p.add_argument("--grasp-steps", type=int, default=6)
     p.add_argument("--place-steps", type=int, default=8)
     p.add_argument("--dtype", choices=["fp32", "bf16"], default="bf16")
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=0, help="seed for per-trial randomized init")
+    p.add_argument("--tag", default="full", help="report subdir: results/benchmarks/closed_loop_<tag>")
+    p.add_argument("--viz-only-selected", action="store_true", default=True,
+                   help="save GIFs only for ~3 best/median/worst trials (default on)")
     args = p.parse_args()
 
     if not os.path.exists(CHECKPOINT):
@@ -542,20 +710,53 @@ def main() -> None:
     autocast_dtype = torch.bfloat16 if args.dtype == "bf16" else None
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(_REPO_ROOT, "outputs", "closed_loop_benchmark", run_id)
-    os.makedirs(out_dir, exist_ok=True)
+    # Comprehensive, self-contained RUN LOG dir (gitignored under logs/) for later diagnosis:
+    # full config + every per-step row. The committed report (summary/plots/selected GIFs) is
+    # written to results/benchmarks/closed_loop_<tag>/<run_id>/.
+    run_dir = os.path.join(_REPO_ROOT, "logs", "closed_loop_runs", run_id)
+    viz_dir = os.path.join(run_dir, "viz")
+    report_dir = os.path.join(_REPO_ROOT, "results", "benchmarks", f"closed_loop_{args.tag}", run_id)
+    os.makedirs(viz_dir, exist_ok=True)
+    os.makedirs(report_dir, exist_ok=True)
+
     csv = clog.CSVLogger(
-        os.path.join("logs", f"closed_loop_benchmark_{run_id}.csv"),
+        os.path.join(run_dir, "steps.csv"),
         "task", "trial", "step", "phase", "energy", "dx", "dy", "dz", "dgrip",
         "rdx", "rdy", "rdz", "ee_x", "ee_y", "ee_z", "obj_x", "obj_y", "obj_z",
-        "tgt_x", "tgt_y", "tgt_z", "dist_goal_m", "obj_dz_m", "tilt_deg", "obj_speed",
+        "tgt_x", "tgt_y", "tgt_z", "err_m", "obj_dz_m", "tilt_deg", "obj_speed",
         "held", "released", "cem_time_s", "success", "failure_type",
     )
 
+    config = {
+        "run_id": run_id, "git_commit": _git_commit(), "timestamp": datetime.now().isoformat(),
+        "model": "vjepa2-ac-vitg (ViT-g encoder 1.01B + AC predictor 305M)",
+        "checkpoint": os.path.relpath(CHECKPOINT, _REPO_ROOT), "checkpoint_sha256": _sha256(CHECKPOINT),
+        "device": str(dev), "dtype": args.dtype,
+        "cem": {"samples": args.samples, "cem_steps": args.cem_steps, "rollout_T": args.rollout,
+                "topk": args.topk, "maxnorm": args.maxnorm, "momentum_mean": 0.15,
+                "objective": "mean-L1 in layer-norm'd latent, gripper axis frozen"},
+        "tasks": args.tasks, "trials_per_task": args.trials, "seed": args.seed,
+        "pos_tol": args.pos_tol,
+        "max_vjepa_steps": {"reach": args.reach_steps, "grasp_lift": args.grasp_steps,
+                            "place": args.place_steps},
+        "thresholds_m": THRESHOLDS, "gate_spec": GATE_SPEC,
+        "env": {"embodiment": "Franka Panda + Robotiq 2F-85 (FrankaDroidEnv)",
+                "camera": "PLANNING_CAMERA (az45_el45 free cam)", "crop": CROP,
+                "cube_half_m": CUBE_HALF, "cube_start_randomized": True,
+                "zone_radius_m": SUCCESS_DEFAULTS["place"]["zone_radius"]},
+        "normalization": "ImageNet mean/std x255 on 0-255 input (matches vendored make_transforms)",
+        "logs": {"run_dir": os.path.relpath(run_dir, _REPO_ROOT),
+                 "steps_csv": "steps.csv", "trials_csv": "trials.csv",
+                 "report_dir": os.path.relpath(report_dir, _REPO_ROOT)},
+    }
+    with open(os.path.join(run_dir, "run_config.json"), "w") as f:
+        json.dump(config, f, indent=2)
+
     logger.info("=" * 64)
-    logger.info("closed-loop smoke | tasks=%s trials=%d | samples=%d cem_steps=%d T=%d maxnorm=%.3f",
+    logger.info("closed-loop benchmark | tasks=%s trials=%d | samples=%d cem_steps=%d T=%d maxnorm=%.3f",
                 args.tasks, args.trials, args.samples, args.cem_steps, args.rollout, args.maxnorm)
-    logger.info("run_id=%s | out=%s", run_id, out_dir)
+    logger.info("run_id=%s | run_log=%s | report=%s", run_id,
+                os.path.relpath(run_dir, _REPO_ROOT), os.path.relpath(report_dir, _REPO_ROOT))
     logger.info("=" * 64)
 
     (encoder, predictor), load_ms = clog.gpu_timer(lambda: load_model(device))
@@ -564,73 +765,148 @@ def main() -> None:
 
     _, plan = make_planner(cem, compute_new_pose, predictor, tokens_per_frame, args, dev, autocast_dtype)
 
-    def encode_goal_factory(env, fovy):
+    def encode_goal_factory():
         def _encode_goal(goal_img):
             with torch.no_grad(), torch.autocast(dev.type, dtype=autocast_dtype,
                                                  enabled=autocast_dtype is not None):
                 return encode(encoder, goal_img, device, tokens_per_frame).detach()
         return _encode_goal
 
-    summary = []
+    trial_csv = clog.CSVLogger(
+        os.path.join(run_dir, "trials.csv"),
+        "task", "trial", "error_m", "success_loose", "failure", "final_energy",
+        "vjepa_steps", "total_steps", "mean_cem_s", "wall_s", "success_at_thresholds",
+    )
+
+    all_records = {}
     for task in args.tasks:
         needs_obj = task in ("grasp_lift", "place")
         env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
                              add_object=needs_obj, add_zone=needs_obj)
         fovy = float(env.model.vis.global_.fovy)
-        ctx = {
-            "encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(env, fovy),
-            "rng": np.random.default_rng(args.seed + hash(task) % 1000),
-            "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
-                           dev=dev, autocast_dtype=autocast_dtype),
-        }
+        task_off = (abs(hash(task)) % 1000) * 100003
+        ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
+               "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
+                              dev=dev, autocast_dtype=autocast_dtype)}
+        records, tlogs = [], []
         for trial in range(args.trials):
+            # deterministic per-trial seeding (numpy init + torch CEM sampling) for reproducibility
+            ctx["rng"] = np.random.default_rng(args.seed * 100003 + task_off + trial)
+            torch.manual_seed(args.seed * 100003 + task_off + trial)
             tlog = TrialLogger(csv, task, trial, fovy, needs_obj)
             t0 = time.perf_counter()
-            res = TASKS[task](env, ctx, tlog, args)
+            rec = TASKS[task](env, ctx, tlog, args)
             dt = time.perf_counter() - t0
-            phases = [r["phase"] for r in tlog.rows]
-            gif = os.path.join(out_dir, f"{task}_t{trial}.gif")
-            imageio.mimsave(gif, tlog.frames, fps=2, loop=0)
-            save_contact_sheet(tlog.frames, os.path.join(out_dir, f"{task}_t{trial}_contact.png"),
-                               phases=phases)
-            tlog.write_markdown(os.path.join(out_dir, f"{task}_t{trial}_frames.md"), res, dt)
-            # separate V-JEPA closed-loop from scripted primitives for the report
             vjepa_rows = [r for r in tlog.rows if str(r["phase"]).startswith("vjepa")]
-            vjepa_final_dist = next((r["dist_goal"] for r in reversed(vjepa_rows)
-                                     if r["dist_goal"] != "-"), "-")
-            logger.info("[%s trial %d] success=%s failure=%s | vjepa_steps=%d final_dist=%s | %.1fs",
-                        task, trial, res.success, res.failure_type, len(vjepa_rows),
-                        vjepa_final_dist, dt)
-            logger.info("    metrics: %s", {k: round(v, 4) if isinstance(v, float) else v
-                                            for k, v in res.metrics.items()})
-            summary.append({"task": task, "trial": trial, "success": int(res.success),
-                            "failure": res.failure_type or "", "vjepa_steps": len(vjepa_rows),
-                            "vjepa_final_dist": vjepa_final_dist, "wall_s": round(dt, 1)})
+            energies = [_pf(r["energy"]) for r in vjepa_rows if _pf(r["energy"]) is not None]
+            cems = [_pf(r["cem_s"]) for r in tlog.rows if _pf(r["cem_s"]) is not None]
+            thr_flags = {t: success_at(rec["error"], rec["gates"], t) for t in THRESHOLDS[task]}
+            rec.update(task=task, trial=trial, wall_s=round(dt, 1),
+                       final_energy=(energies[-1] if energies else None),
+                       vjepa_steps=len(vjepa_rows), total_steps=len(tlog.rows),
+                       mean_cem_s=(float(np.mean(cems)) if cems else float("nan")),
+                       thr_flags=thr_flags,
+                       all_success=any(thr_flags.values()))  # success at the LOOSEST threshold
+            records.append(rec)
+            tlogs.append(tlog)
+            trial_csv.log(task, trial, round(rec["error"], 4), int(rec["all_success"]),
+                          rec["failure"], _r(rec["final_energy"]), rec["vjepa_steps"],
+                          rec["total_steps"], _r(rec["mean_cem_s"]), rec["wall_s"],
+                          json.dumps({str(k): int(v) for k, v in thr_flags.items()}))
+            logger.info("[%s t%02d] error=%.4f m gates=%s failure=%s | vjepa=%d steps | %.0fs",
+                        task, trial, rec["error"], rec["gates"], rec["failure"] or "-",
+                        rec["vjepa_steps"], dt)
         env.close()
 
-    # per-task success rate (the headline) + a committed summary CSV
-    trial_csv = clog.CSVLogger(
-        os.path.join(_REPO_ROOT, "results", "benchmarks", "closed_loop_smoke",
-                     f"trials_{run_id}.csv"),
-        "task", "trial", "success", "failure", "vjepa_steps", "vjepa_final_dist", "wall_s",
-    )
-    for s in summary:
-        trial_csv.log(s["task"], s["trial"], s["success"], s["failure"], s["vjepa_steps"],
-                      s["vjepa_final_dist"], s["wall_s"])
+        # visualize only the selected (best/median/worst) trials -> GIF + contact sheet + md
+        sel = select_for_viz(records)
+        for i in sel:
+            frames = tlogs[i].build_frames()
+            imageio.mimsave(os.path.join(viz_dir, f"{task}_t{i}.gif"), frames, fps=2, loop=0)
+            save_contact_sheet(frames, os.path.join(viz_dir, f"{task}_t{i}_contact.png"),
+                               phases=tlogs[i].phases)
+            tlogs[i].write_markdown(os.path.join(viz_dir, f"{task}_t{i}_frames.md"), records[i],
+                                    records[i]["wall_s"])
+        write_task_plots(records, task, os.path.join(report_dir, f"{task}_summary.png"))
+        all_records[task] = records
+
+    # ---- summary tables (committed) + copy selected GIFs/contact sheets into the report ----
+    summaries = [summarize_task(all_records[t], t) for t in args.tasks]
+    _write_summary(report_dir, run_id, config, summaries, args)
+    for task in args.tasks:
+        for i in select_for_viz(all_records[task]):
+            for suf in (f"{task}_t{i}.gif", f"{task}_t{i}_contact.png"):
+                src = os.path.join(viz_dir, suf)
+                if os.path.exists(src):
+                    shutil.copy(src, os.path.join(report_dir, suf))
 
     logger.info("-" * 64)
-    logger.info("SUCCESS RATES (config: samples=%d T=%d cem_steps=%d maxnorm=%.3f, seed=%d)",
+    logger.info("PRECISION-CURVE SUMMARY (samples=%d T=%d cem_steps=%d maxnorm=%.3f seed=%d)",
                 args.samples, args.rollout, args.cem_steps, args.maxnorm, args.seed)
-    for task in args.tasks:
-        rows = [s for s in summary if s["task"] == task]
-        ok = sum(s["success"] for s in rows)
-        fails = [s["failure"] for s in rows if not s["success"]]
-        logger.info("  %-11s %d/%d success | failures=%s", task, ok, len(rows), fails)
-    logger.info("NOTE: reach = pure V-JEPA; grasp = V-JEPA reach + scripted close/lift; "
-                "place = scripted grasp + V-JEPA place + scripted lower/open. Hidden-state success.")
-    logger.info("artifacts: %s | trial csv: results/benchmarks/closed_loop_smoke/trials_%s.csv",
-                out_dir, run_id)
+    for s in summaries:
+        thr_str = " ".join(f"@{_cm(t)}cm={s[f'succ@{t}']*100:.0f}%" for t in THRESHOLDS[s["task"]])
+        logger.info("  %-11s n=%d mean_err=%.3f median=%.3f p90=%.3f | %s",
+                    s["task"], s["n"], s["mean_err"], s["median_err"], s["p90_err"], thr_str)
+    logger.info("run log (gitignored): %s", os.path.relpath(run_dir, _REPO_ROOT))
+    logger.info("committed report: %s", os.path.relpath(report_dir, _REPO_ROOT))
     logger.info("done")
+
+
+def _write_summary(report_dir, run_id, config, summaries, args):
+    """Write summary.csv + summary.md into the committed report dir."""
+    scsv = clog.CSVLogger(
+        os.path.join(report_dir, "summary.csv"),
+        "task", "n", "mean_err_m", "median_err_m", "p75_err_m", "p90_err_m",
+        "mean_steps", "mean_vjepa_steps", "mean_cem_s", "thresholds_m", "success_rates",
+    )
+    for s in summaries:
+        rates = {f"{t}": round(s[f"succ@{t}"], 3) for t in THRESHOLDS[s["task"]]}
+        scsv.log(s["task"], s["n"], round(s["mean_err"], 4), round(s["median_err"], 4),
+                 round(s["p75_err"], 4), round(s["p90_err"], 4), round(s["mean_steps"], 1),
+                 round(s["mean_vjepa_steps"], 1), round(s["mean_cem_s"], 2),
+                 str(THRESHOLDS[s["task"]]), json.dumps(rates))
+
+    lines = [
+        f"# Closed-loop benchmark -- run {run_id}",
+        "",
+        f"Config: model **{config['model']}**, samples **{args.samples}**, cem_steps "
+        f"**{args.cem_steps}**, rollout **T={args.rollout}**, topk **{args.topk}**, maxnorm "
+        f"**{args.maxnorm} m**, dtype **{args.dtype}**, **{args.trials} trials/task**, seed {args.seed}.",
+        f"Commit `{config['git_commit'][:10]}`. Success = error < threshold AND physical gates "
+        "(lifted/held/upright/stable/released), judged from hidden MuJoCo truth. Cube/target "
+        "positions randomized per trial.",
+        "",
+        "## Precision curve (success rate at multiple thresholds, one run)",
+        "",
+    ]
+    for s in summaries:
+        thrs = THRESHOLDS[s["task"]]
+        header = "| task | n | mean err (cm) | median | p90 | " + \
+                 " | ".join(f"@{_cm(t)}cm" for t in thrs) + " |"
+        sep = "|" + "---|" * (5 + len(thrs))
+        row = (f"| **{s['task']}** | {s['n']} | {s['mean_err']*100:.1f} | "
+               f"{s['median_err']*100:.1f} | {s['p90_err']*100:.1f} | "
+               + " | ".join(f"{s[f'succ@{t}']*100:.0f}%" for t in thrs) + " |")
+        lines += [header, sep, row, ""]
+        if s["failures"]:
+            lines.append(f"- {s['task']} failures: {s['failures']}")
+        lines.append(f"- {s['task']} mean steps {s['mean_steps']:.1f} "
+                     f"(V-JEPA {s['mean_vjepa_steps']:.1f}), mean CEM {s['mean_cem_s']:.1f} s/step")
+        lines.append("")
+    lines += [
+        "## Task decomposition (what V-JEPA does vs scripted)",
+        "- **reach**: pure V-JEPA closed-loop to a goal image.",
+        "- **grasp_lift**: V-JEPA reaches the grasp pose; only close+lift scripted "
+        "(error = object-EE xy before close).",
+        "- **place**: scripted grasp, then V-JEPA drives the held cube over the zone; release "
+        "lowers straight down (error = object-zone xy).",
+        "",
+        "Plots: `<task>_summary.png` (error histogram, precision curve, failure types, "
+        "error-vs-energy). Selected GIFs/contact sheets: 3 best/median/worst per task. Full "
+        "per-step logs + config: gitignored `logs/closed_loop_runs/<run_id>/`.",
+    ]
+    with open(os.path.join(report_dir, "summary.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":
