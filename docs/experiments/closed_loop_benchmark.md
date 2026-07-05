@@ -152,6 +152,24 @@ released, success/failure).
 
 ## Results
 
+### Full run, 50 trials/task, samples=200 (paper-faithful protocols, seed 0)
+
+The authoritative precision curves. Report:
+[results/benchmarks/closed_loop_full_s200/SUMMARY.md](../../results/benchmarks/closed_loop_full_s200/SUMMARY.md).
+
+| task | n | mean (cm) | median | p90 | success @ thresholds | main failures |
+|---|---|---|---|---|---|---|
+| **reach** | 50 | 2.5 | 2.4 | 3.5 | @5cm **96%**, @3cm 70%, @1.5cm 24% | too_far x2 |
+| **grasp_lift** | 50 | 1.9 | 1.7 | 3.1 | @6cm **54%**, @3cm 52%, @2cm 36% | missed x22 |
+| **pick_place** | 50 | 21.6 | 22.6 | 28.5 | @10cm **6%**, @6cm 2%, @3cm 0% | outside_zone x29, grasp_failed x19 |
+
+Reading: reach is a reliable coarse skill (96% @5cm). Grasp-Lift *positions* superbly (mean 1.9 cm,
+52% within 3 cm) but single-goal grasp *success* plateaus at 54% -- the grip misses on ~44% of
+trials even when well positioned (the multistage pregrasp->grasp ablation closes this in the smoke).
+Pick-Place (full composite) succeeds 6% at the 10 cm zone -- the honest vanilla baseline for the
+hardest task, split between never-grasping (19/50) and placing outside the zone (29/50). The 400-
+and 800-sample stages follow (sample ablation).
+
 ### Smoke comparison, 5 trials/task, single-goal vs multistage (config above, seed 0)
 
 Each rollout records one continuous error; `success@t` = error < t AND all physical gates. n=5 is a
