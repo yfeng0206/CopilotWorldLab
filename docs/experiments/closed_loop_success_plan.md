@@ -347,12 +347,15 @@ headline success-rate is reported.
 Robomimic raw-render (Stage 0, `render_robomimic_task.py`) stays as an established-data reference
 and image source, but the closed-loop success runs in our own env.
 
+Status (done): `scripts/run_closed_loop_benchmark.py` wires V-JEPA CEM at the paper config, uses
+`src/bench/success.py` + `src/bench/thresholds.py` for hidden multi-threshold success, implements
+the paper-faithful `pick_place` (3 sub-goals, 4/10/4), CEM chunking for large sample counts, and a
+GT-vs-V-JEPA side-by-side demo. The n=5 smoke + single-vs-multistage comparison are done.
+
 Next:
-1. Scripted expert (grasp-lift **and** place) -> capture sub-goal images (reach/grasp/lift/place)
-   -> task bundles + contact sheet + GIF for **user visual approval**.
-2. `scripts/run_closed_loop_benchmark.py` wiring V-JEPA CEM at the paper config, using the
-   implemented `src/bench/success.py` for hidden success -> staged runs (validate 3x5-8 ->
-   20 trials @100/@200 -> final @800). Reconcile the T=1/T=2 horizon against the paper.
+1. Run the full **50-trial** benchmark across samples **200 -> 400 -> 800** (reach, grasp_lift,
+   pick_place) and report the precision curves + sample ablation.
+2. Reconcile the T=1/T=2 horizon against the paper (ablation).
 
 ## Sub-goal protocol abstraction (single-goal vs multistage)
 

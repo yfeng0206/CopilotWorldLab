@@ -75,7 +75,10 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
       reach succeeds; multi-goal chaining works. Interface calibration (W*) still pending.
 - [x] Graspable-object env substrate: cube + place zone + hidden success functions
       (`src/bench/success.py`), scripted grasp-lift regression passes.
-- [ ] Closed-loop task-success benchmark runner (Reach/Grasp-lift/Place) + staged runs.
+- [x] Closed-loop task-success benchmark runner (Reach/Grasp-lift/Place/Pick-Place) with
+      multi-threshold precision curves, paper-faithful pick_place (4/10/4), CEM chunking, and a
+      GT-vs-V-JEPA side-by-side demo. n=5 smoke + single-vs-multistage comparison done; full
+      50-trial run (samples 200/400/800) pending.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 

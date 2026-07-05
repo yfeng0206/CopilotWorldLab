@@ -137,7 +137,10 @@ dataset before proving the method. This intentionally deprioritizes the earlier 
 - The camera-placement ablation is **interface calibration** (which view/frame to plan in), not
   a benchmark.
 - Benchmark (1), transition scoring, is the **first real benchmark with a vanilla baseline**.
-- No closed-loop planning success has been measured yet; that is benchmark (2).
+- Closed-loop **task-success** on our own MuJoCo `FrankaDroidEnv` is now measured (Reach / Grasp /
+  Pick-Place, hidden-state success, multi-threshold precision curves; see
+  [closed_loop_benchmark.md](closed_loop_benchmark.md)). Official established-suite closed-loop
+  *rollout* success (robosuite/ManiSkill) is still benchmark (2), gated on Linux/WSL2.
 
 ## Reproducibility
 
