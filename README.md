@@ -42,10 +42,10 @@ Reproducible experiments with honest, primary-source-verified numbers (see
   env (V-JEPA plans the coarse motion; scripted gripper; hidden-state success), with a paper-like
   **single-goal vs multistage** sub-goal comparison (n=5/task):
   **Reach mean 2.4 cm** (100%@5cm); **Grasp-Lift** improved by multistage (pregrasp→grasp: @3cm
-  40%→80%, held 3/5→4/5); **Place fails ~15-16 cm** under both protocols — a genuine V-JEPA
-  placement-precision limit (fixing the goal image did not help), exposing the gap the Phase 2–4
-  improvements must close. Rollout GIFs + methodology:
-  [closed_loop_benchmark.md](docs/experiments/closed_loop_benchmark.md).
+  40%→80%, held 3/5→4/5); **Place fails ~15-16 cm** under both protocols — fixing the goal image
+  did not help, so this is *likely* a placement-precision limit rather than a goal-image artifact
+  (n=5, to confirm at 50 trials), exposing the gap the Phase 2–4 improvements must close. Rollout
+  GIFs + methodology: [closed_loop_benchmark.md](docs/experiments/closed_loop_benchmark.md).
 
 Honest boundary: only Reach is a pure V-JEPA success; grasp/place are V-JEPA coarse motion +
 scripted gripper, scored on hidden privileged sim state. Multistage helps grasp (meaningful

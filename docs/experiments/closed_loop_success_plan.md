@@ -372,8 +372,9 @@ branching):
 Empirical outcome (n=5, see [closed_loop_benchmark.md](closed_loop_benchmark.md)): multistage helps
 **grasp** (a meaningful vertical waypoint: @3cm 40%->80%, held 3/5->4/5) but **not place** (no
 meaningful horizontal waypoint; the descent adds error). Place fails ~15-16 cm under both protocols
-even after the held-object goal-image fix — a genuine V-JEPA precision limit, not a goal-image
-artifact.
+even after the held-object goal-image fix (verified in `goal_image_check.png`) — at n=5 this
+*suggests* a placement-precision / object-salience limitation rather than the old goal-image
+artifact, to confirm at 50 trials.
 
 References: [benchmark_plan.md](benchmark_plan.md), [transition_scoring.md](transition_scoring.md),
 [cem_closed_loop.md](cem_closed_loop.md), [../lessons_learned.md](../lessons_learned.md) #11/#19.

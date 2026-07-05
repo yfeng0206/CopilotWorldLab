@@ -12,6 +12,15 @@ statistically converged rate; the full 50-trial run is the authoritative precisi
 reports: [single_goal](../closed_loop_single_goal_smoke/), [multistage](../closed_loop_multistage_smoke/).
 All 30 trials: [`comparison_5trial.csv`](comparison_5trial.csv).
 
+## Goal-image check (auditability)
+
+![goal image check](goal_image_check.png)
+
+Every goal image the planner optimizes toward, with red=object-in-goal / blue=EE-goal / green=zone
+(PLANNING_CAMERA projection). Confirms the corrected place goals carry the **held cube over the
+zone** (bottom row) rather than leaving it behind, and the grasp goals place the arm above/around
+the cube (top row). Regenerate: `python scripts/goal_image_check.py` (MuJoCo-only, no GPU).
+
 ## Protocols
 
 - **single_goal** -- one goal image per task (baseline). place uses the corrected held-object goal.
@@ -57,12 +66,19 @@ horizontal waypoint (our place is short-horizon, unlike the paper's from-scratch
 
 - **Reach** is a solid coarse skill.
 - **Multistage helps grasp** where there is a meaningful vertical waypoint.
-- **Place is a genuine V-JEPA placement-precision limit, not a goal-image artifact.** Fixing the
-  malformed place goal image (the held cube is now carried over the zone, not left behind) did
-  **not** improve place (~15.6 cm, was ~15-18 cm). Likely cause: V-JEPA's latent similarity is
+- **Place stays poor after the goal-image fix (likely a real precision/salience limit, to confirm
+  at 50 trials).** Fixing the malformed place goal image (the held cube is now carried over the
+  zone, not left behind — verified in `goal_image_check.png`) did **not** improve place (~15.6 cm,
+  was ~15-18 cm). At n=5 this suggests a placement-precision / object-salience limitation rather
+  than the old goal-image artifact; a plausible cause is that V-JEPA's latent similarity is
   dominated by the large arm/gripper pose, not the small cube, so the object's position in the goal
-  image has little planning leverage. Place is the vanilla baseline the improvements (W* frame
-  calibration, predictor fine-tuning, POV/cross-view; Phases 2-4) must beat on this exact protocol.
+  image has little planning leverage. This is a preliminary reading — the 50-trial run is needed
+  before a strong claim. Place is the vanilla baseline the improvements (W* frame calibration,
+  predictor fine-tuning, POV/cross-view; Phases 2-4) must beat on this exact protocol.
+
+Goal-image audit: `goal_image_check.png` renders every goal image the planner sees (grasp
+pregrasp/grasp; place vicinity/final) with red=object / blue=EE-goal / green=zone markers,
+confirming the held cube is carried over the zone.
 
 Reproduce: `python scripts/run_closed_loop_benchmark.py --protocol single_goal --tasks reach grasp_lift place --trials 5 --tag single_goal_smoke`
 (and `--protocol multistage --tag multistage_smoke`).

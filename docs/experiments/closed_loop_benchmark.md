@@ -61,7 +61,9 @@ objective = mean-L1 in layer-norm'd latent with the gripper axis frozen · reced
 (Matches Meta's released `world_model_wrapper.py` robot config; `momentum_std=0.15` and
 `pos_tol=0.015` set the loop to keep refining down to the tightest precision threshold. The paper
 text quotes a larger population ~800 and may report horizon 1 — we ablate T=1 vs T=2 and samples
-200/400/800 later. See [../architecture.md](../architecture.md#7-planner-config-verified-from-released-code).)
+200/400/800 later. samples=200/T=2 fits the 3090 (~16 GB); **the 400/800 ablations require porting
+the chunked predictor (`vjepa2_ac_infer_test.py`) first to avoid OOM** — do not attempt them until
+then. See [../architecture.md](../architecture.md#7-planner-config-verified-from-released-code).)
 
 ## Protocols: single-goal vs multistage
 
@@ -136,11 +138,14 @@ Honest reading:
 - **Multistage does not help place** (16.6 vs 15.6 cm, both 0%): the vicinity → final descent adds
   error with no meaningful horizontal waypoint — our place is short-horizon, unlike the paper's
   from-scratch pick-and-place.
-- **Place is a genuine V-JEPA placement-precision limit, not a goal-image artifact.** Fixing the
-  malformed place goal image (the held cube is now rigidly carried over the zone rather than left
-  behind at its grasp site) did **not** improve place (~15.6 cm, was ~15–18 cm). Likely cause:
+- **Place stays poor after the goal-image fix — likely a real precision/salience limit, to confirm
+  at 50 trials.** Fixing the malformed place goal image (the held cube is now rigidly carried over
+  the zone rather than left behind at its grasp site — verified in `goal_image_check.png`) did
+  **not** improve place (~15.6 cm, was ~15–18 cm). At n=5 this suggests a placement-precision /
+  object-salience limitation rather than the old goal-image artifact; a plausible cause is that
   V-JEPA's latent similarity is dominated by the large arm/gripper pose, not the small cube, so the
-  object's position in the goal image has little planning leverage. This is the vanilla baseline the
+  object's position in the goal image has little planning leverage. This is a preliminary reading —
+  the 50-trial run is needed before any strong claim. Either way, place is the vanilla baseline the
   improvements (W* frame calibration, predictor fine-tuning, POV/cross-view; Phases 2–4) must beat.
 
 Note on reproducibility: seeds pin the RNG (cube/target placement, CEM samples), but bf16 GPU
