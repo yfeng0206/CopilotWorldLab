@@ -1,12 +1,13 @@
-"""Tiny smoke benchmark runner: closed-loop V-JEPA 2-AC on Reach / Grasp-Lift / Place.
+"""Closed-loop V-JEPA 2-AC benchmark runner: Reach / Grasp-Lift / Place.
 
-The Phase-1 task-success benchmark (docs/experiments/closed_loop_success_plan.md), at SMOKE scale.
+The Phase-1 task-success benchmark (docs/experiments/closed_loop_benchmark.md). Runs at any scale:
+1-5 trials for a smoke check, 50 trials for the full precision-curve benchmark.
 For each task the model sees only an RGB image (the validated PLANNING_CAMERA), the 7-D EE state,
 and a goal image; V-JEPA 2-AC plans the coarse motion with CEM MPC. Scripted primitives handle the
 gripper (close/lift/open). Success is judged ONLY from hidden privileged MuJoCo truth
 (src/bench/success.py) -- object pose, contacts, velocity, tilt -- never from the latent energy.
 
-CEM config (defaults follow Meta's released wrapper; smaller population for the 3090 smoke):
+CEM config (defaults follow Meta's released wrapper; smaller population for the 3090):
     samples=200, cem_steps=10, rollout/horizon T=2, topk=10, maxnorm=0.05 m/axis, momentum 0.15.
 Later ablations (not here): T=1 vs T=2, samples 200/400/800, maxnorm 0.05 vs 0.075.
 
@@ -18,12 +19,13 @@ Task decomposition (honest separation of V-JEPA vs scripted; success from hidden
                 cube over the zone; the release lowers straight down at V-JEPA's reached xy (no
                 move-to-zone-center), so the rate reflects V-JEPA's placement accuracy.
 
-Per trial: per-step CSV (logs/), a GIF, a phase-keyed contact sheet, and a readable markdown frame
-table (outputs/closed_loop_benchmark/<run_id>/). A committed trial-summary CSV with per-task
-success rates lands in results/benchmarks/closed_loop_smoke/. Cube/target positions are randomized
-per trial (seeded).
+One continuous error per trial -> success@multiple precision thresholds computed from a single run.
+Full run-log (config + per-step CSV + per-trial CSV + selected viz) lands under
+logs/closed_loop_runs/<run_id>/; the committed report (summary.md/csv, plots, selected GIFs +
+contact sheets for ~3 best/median/worst trials) lands under results/benchmarks/closed_loop_<tag>/.
+Cube/target positions are randomized per trial (stably seeded; see TASK_SEED_OFFSET).
 
-    python scripts/run_closed_loop_benchmark.py --tasks reach grasp_lift place --trials 1
+    python scripts/run_closed_loop_benchmark.py --tasks reach grasp_lift place --trials 50
 """
 from __future__ import annotations
 
@@ -433,6 +435,9 @@ GATE_SPEC = {
     "grasp_lift": ["lifted", "held", "upright", "stable"],
     "place": ["upright", "stable", "released"],
 }
+# Stable per-task seed offsets. Do NOT use hash(task): Python randomizes string hashing per
+# process (PYTHONHASHSEED), so it would break cross-run reproducibility of the seeded init.
+TASK_SEED_OFFSET = {"reach": 0, "grasp_lift": 1, "place": 2}
 
 
 def _rand_cube_xy(rng):
@@ -784,7 +789,7 @@ def main() -> None:
         env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
                              add_object=needs_obj, add_zone=needs_obj)
         fovy = float(env.model.vis.global_.fovy)
-        task_off = (abs(hash(task)) % 1000) * 100003
+        task_off = TASK_SEED_OFFSET[task] * 100003
         ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                               dev=dev, autocast_dtype=autocast_dtype)}
