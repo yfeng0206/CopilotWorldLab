@@ -297,6 +297,9 @@ class TrialLogger:
         self.steps = []  # per-step dicts: img + projected markers + stats panel (for GIF/contact)
         self.rows = []   # compact per-step dicts for the markdown frame table
         self.step = 0
+        self.record_qpos = False   # set True (via --replay-record) to capture qpos for 3D replay
+        self.qpos_frames = []      # per-step full qpos (for the interactive MuJoCo rollout viewer)
+        self.qpos_stats = []       # per-step raw scalars aligned with qpos_frames
 
     def record(self, env, phase, action, realized, energy, target, cem_time,
                dist_goal, success="", failure=""):
@@ -348,7 +351,30 @@ class TrialLogger:
             "dist_goal": _fmt(dist_goal), "obj_dz": _fmt(obj_dz), "tilt": _fmt(tilt),
             "speed": _fmt(speed), "held": held, "released": released, "cem_s": _fmt(cem_time),
         })
+        if self.record_qpos:
+            def _f(x):
+                try:
+                    return float(x)
+                except (TypeError, ValueError):
+                    return float("nan")
+            self.qpos_frames.append(env.data.qpos.copy())
+            self.qpos_stats.append({"phase": phase, "step": self.step, "dist": _f(dist_goal),
+                                    "energy": _f(energy), "tilt": _f(tilt),
+                                    "held": (int(held) if held != "" else -1), "grip": _f(a[6])})
         self.step += 1
+
+    def save_rollout(self, path, object_type):
+        """Save the recorded per-step qpos + scalars for 3D replay (scripts/replay_rollout_viewer.py)."""
+        st = self.qpos_stats
+        np.savez(path,
+                 qpos=np.asarray(self.qpos_frames, dtype=float),
+                 phase=np.asarray([s["phase"] for s in st]),
+                 dist=np.asarray([s["dist"] for s in st], dtype=float),
+                 energy=np.asarray([s["energy"] for s in st], dtype=float),
+                 tilt=np.asarray([s["tilt"] for s in st], dtype=float),
+                 held=np.asarray([s["held"] for s in st], dtype=float),
+                 grip=np.asarray([s["grip"] for s in st], dtype=float),
+                 object_type=object_type, task=self.task, trial=int(self.trial))
 
     def build_frames(self):
         """Build the annotated panels for this trial (only called for selected/visualized trials)."""
@@ -426,15 +452,22 @@ def make_planner(cem, compute_new_pose, predictor, tokens_per_frame, args, dev, 
             return cem(context_frame=z_ctx, context_pose=s_ctx, goal_frame=z_goal,
                        world_model=step_predictor, rollout=args.rollout, samples=args.samples,
                        cem_steps=args.cem_steps, topk=args.topk, maxnorm=args.maxnorm,
-                       axis={3: 0.0}, momentum_mean=0.15, momentum_std=0.15,
+                       axis=({} if getattr(args, "plan_gripper", False) else {3: 0.0}),
+                       momentum_mean=0.15, momentum_std=0.15,
                        momentum_mean_gripper=0.15, momentum_std_gripper=0.15)
 
     return step_predictor, plan
 
 
 def cem_to_goal(env, encoder, predictor_plan, z_goal, target, tlog, phase, max_steps,
-                pos_tol, encode_fn, device, tokens_per_frame, dev, autocast_dtype):
-    """Closed-loop CEM to a goal image; gripper frozen. Returns steps taken and final distance."""
+                pos_tol, encode_fn, device, tokens_per_frame, dev, autocast_dtype,
+                freeze_gripper=True):
+    """Closed-loop CEM to a goal image. Returns steps taken and final distance.
+
+    ``freeze_gripper`` (default True) zeros the executed gripper action so V-JEPA plans arm-only and
+    the gripper is scripted afterward (our honest-separation baseline). Set False (via
+    ``--plan-gripper``) to execute the gripper action the CEM chose -- the paper-faithful mode, where
+    the goal images (which show a closed/open gripper) become reachable by the planner itself."""
     import torch
     import torch.nn.functional as F
 
@@ -453,7 +486,8 @@ def cem_to_goal(env, encoder, predictor_plan, z_goal, target, tlog, phase, max_s
         s_ctx = torch.tensor(state, dtype=torch.float32).view(1, 1, 7).to(device)
         t0 = time.perf_counter()
         action = predictor_plan(z_ctx, s_ctx, z_goal)[0, 0].float().cpu().numpy()
-        action[6] = 0.0  # gripper frozen during the V-JEPA reach
+        if freeze_gripper:
+            action[6] = 0.0  # gripper frozen during the V-JEPA reach (scripted close/open afterward)
         cem_time = time.perf_counter() - t0
         nxt = env.apply_action(action)
         realized = nxt[:3] - state[:3]
@@ -1109,7 +1143,8 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
             fovy = float(env.model.vis.global_.fovy)
             ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                    "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
-                                  dev=dev, autocast_dtype=autocast_dtype)}
+                                  dev=dev, autocast_dtype=autocast_dtype,
+                                  freeze_gripper=not args.plan_gripper)}
             label = f"{task}/{obj}"
             pair_off = zlib.crc32(label.encode()) & 0xFFFF  # per-(task,object) seed offset
             records, tlogs = [], []
@@ -1117,9 +1152,13 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
                 bundle = TaskBundle.load(os.path.join(obj_dir, bid))
                 torch.manual_seed(args.seed * 100003 + pair_off * 997 + ti)  # CEM sampling (bf16 noisy)
                 tlog = TrialLogger(csv, label, ti, fovy, True)
+                tlog.record_qpos = bool(args.replay_record)
                 t0 = time.perf_counter()
                 rec = run_bundle_trial(env, ctx, tlog, args, bundle)
                 dt = time.perf_counter() - t0
+                if args.replay_record:
+                    os.makedirs(args.replay_record, exist_ok=True)
+                    tlog.save_rollout(os.path.join(args.replay_record, f"{task}_{obj}_{bid}.npz"), obj)
                 vjepa_rows = [r for r in tlog.rows if str(r["phase"]).startswith("vjepa")]
                 energies = [_pf(r["energy"]) for r in vjepa_rows if _pf(r["energy"]) is not None]
                 cems = [_pf(r["cem_s"]) for r in tlog.rows if _pf(r["cem_s"]) is not None]
@@ -1243,6 +1282,13 @@ def main() -> None:
                    help="CEM planning horizon T (paper p.37 = 1; each candidate is one next action)")
     p.add_argument("--topk", type=int, default=10)
     p.add_argument("--maxnorm", type=float, default=0.05, help="CEM per-axis action clip (m)")
+    p.add_argument("--plan-gripper", action="store_true", default=False,
+                   help="let CEM plan the gripper action (paper-faithful: goal images show the "
+                        "closed/open gripper, so the planner can reach them). Default off = gripper "
+                        "frozen during the V-JEPA reach and scripted afterward (honest-separation).")
+    p.add_argument("--replay-record", default=None,
+                   help="dir to save per-trial qpos rollouts (npz) for the interactive 3D replay "
+                        "viewer (scripts/replay_rollout_viewer.py). Bundle mode only.")
     p.add_argument("--pos-tol", type=float, default=0.015,
                    help="early-stop the CEM loop when EE is within this of the goal (m); set to the "
                         "tightest precision threshold so the loop does not quit before the strictest "
@@ -1404,7 +1450,8 @@ def main() -> None:
                "csv": csv, "fovy": float(env.model.vis.global_.fovy),
                "rng": np.random.default_rng(seed),
                "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
-                              dev=dev, autocast_dtype=autocast_dtype)}
+                              dev=dev, autocast_dtype=autocast_dtype,
+                              freeze_gripper=not args.plan_gripper)}
         out = os.path.join(demo_dir, f"demo_{args.demo}_compare.gif")
         torch.manual_seed(seed)
         info = run_demo(env, ctx, args, out)
@@ -1433,7 +1480,8 @@ def main() -> None:
         task_off = TASK_SEED_OFFSET[task] * 100003
         ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
-                              dev=dev, autocast_dtype=autocast_dtype)}
+                              dev=dev, autocast_dtype=autocast_dtype,
+                              freeze_gripper=not args.plan_gripper)}
         records, tlogs = [], []
         for trial in range(args.trials):
             # deterministic per-trial seeding (numpy init + torch CEM sampling) for reproducibility
