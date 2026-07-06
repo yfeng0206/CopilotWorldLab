@@ -95,8 +95,15 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
       images, auto-switches sub-goals on the step budget, scripts only the gripper, scores
       object-in-zone + released with the swept sphere `x`). Smoke-validated end-to-end; new task
       thresholds/gates in `src/bench/thresholds.py`.
-- [ ] **Full run + report:** run at samples 200 (then 400/800) over grasp / reach_with_object /
-      grasp_and_reach / pick_place x cup/box (50 each); publish per (task, object) precision curves.
+- [x] **Audit fixes (P1/P2) + docs sync:** CLI mode guard, error-aware `bundle_classify`, THRESHOLDS
+      as single source of truth, placement-fair `object_placed`, provenance (mode + bundle_id), fail-loud
+      loader, report GIFs, viewer/schema/threshold docs. Tests: `tests/test_bundle_bench.py` (49 passed).
+      Held-grip stability empirically verified (no physics change). Committed + pushed to main (8c129aa).
+- [~] **Full run + report (RUNNING, detached):** `logs/full_bench/run_overnight.ps1` chains Pass0 n=5
+      @samples200 (coverage, ~3.4h) -> PassA n=50 @200 (~34h) -> PassB n=50 @400 (~68h, gated on PassA).
+      All 4 tasks x cup/box. Note: samples200 = 25.3s/CEM-step -> full run is multi-day, not one night.
+      Reports: `results/benchmarks/closed_loop_{bundle200_n5,full200,full400}/`. Halt via
+      `logs/full_bench/STOP`. Then publish per-(task,object) precision curves + compare to paper Table 3.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 
