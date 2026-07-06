@@ -195,16 +195,17 @@ def build_pick_place(env, rng, obj):
     half = OBJECT_SPECS[obj]["rest_half_z"]
     zone = env.zone_center()
     approach, grasp = _grasp_points(obj, c)
-    grasped_pos = grasp + np.array([0.0, 0.0, 0.04])  # grasped + slightly lifted (sub-goal 1)
     arrays["grasp_pos"] = grasp.astype(float)
-    # scripted grasp FIRST, so all three sub-goals show the SAME grasp (object held), differing only
-    # in location -- sub-goal 1 = grasped at the object, 2 = held in the vicinity, 3 = placed.
+    # scripted grasp FIRST; sub-goal 1 = object JUST GRABBED at its location (not lifted),
+    # 2 = held in the vicinity, 3 = placed -- all the same grasp, differing only in location.
     _goto(env, approach)
     _goto(env, grasp)
     _goto(env, grasp, grip=1.0)
-    _goto(env, grasped_pos, grip=1.0)
     if not env.gripper_holds_object():
         return None, None, None, False
+    goal_1 = env.capture_goal_image(pos=grasp, euler=EE_DOWN, gripper=1.0, camera="planning",
+                                    held_object=True)   # just grabbed, still on the table (not lifted)
+    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for transport
     # the object hangs off the TCP by the grasp offset (rim grasp); shift the transport targets by
     # that hold offset so the OBJECT -- not the gripper -- ends over the zone.
     hold_off = env.get_ee_state()[:3] - env.object_position()
@@ -212,8 +213,6 @@ def build_pick_place(env, rng, obj):
     place_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.04])
     arrays["vicinity_pos"] = vicinity_pos.astype(float)
     arrays["place_pos"] = place_pos.astype(float)
-    goal_1 = env.capture_goal_image(pos=grasped_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                    held_object=True)   # object grasped (rim grip) at its location
     goal_2 = env.capture_goal_image(pos=vicinity_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
                                     held_object=True)
     goal_g = env.capture_goal_image(pos=place_pos, euler=EE_DOWN, gripper=1.0, camera="planning",

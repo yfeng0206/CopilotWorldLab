@@ -17,7 +17,6 @@ Fetch the Menagerie models first (into the gitignored ``third_party/``):
 """
 from __future__ import annotations
 
-import math
 import os
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,14 +44,13 @@ CUBE_START = (0.5, -0.10, 0.24)   # on the table top (z = 0.22 + half)
 # 2506.09985 Fig. 14) -- needs precise finger width. 5 x 4 x 6 cm (half-sizes below).
 BOX_HALF = (0.025, 0.02, 0.03)
 
-# Cup: a procedural thin-wall OPEN cylinder (MuJoCo has no hollow-cylinder primitive), grasped by the
-# rim -- one finger inside, fingers around the wall (paper's Cup object). Built as a ring of box wall
-# segments + a bottom disk, all in the one manipuland body.
-CUP_OUTER_R = 0.03         # outer radius (6 cm outer diameter, within the 2F-85 ~85 mm stroke)
+# Cup: a CUBE cup -- an open-top SQUARE box (bottom + 4 flat walls; MuJoCo has no hollow primitive),
+# grasped on ONE wall's rim (one finger inside the cup, one outside that wall: \|/ ). Flat walls make
+# the rim grasp far easier/cleaner than a round cup (paper's Cup object, but box-shaped for the sim).
+CUP_OUTER_R = 0.03         # outer half-width (6 cm across, within the 2F-85 ~85 mm stroke)
 CUP_WALL_T = 0.006         # wall thickness
 CUP_HALF_H = 0.035         # 7 cm tall
-CUP_SEGMENTS = 12          # wall box segments around the ring
-CUP_BOTTOM_HALF = 0.004    # bottom disk half-thickness
+CUP_BOTTOM_HALF = 0.004    # bottom plate half-thickness
 
 # Per-object rest half-height (for placing the object resting on the table), grasp style, the grasp
 # z offset from the object CENTRE, and an xy grasp offset. cube/box grasp top-down at the centre; the
@@ -133,23 +131,32 @@ def _add_object_geoms(body, object_type: str, mujoco) -> None:
         g.rgba = [0.20, 0.35, 0.80, 1.0]
         _apply_object_material(g)
     elif object_type == "cup":
+        # cube cup: a bottom plate + 4 flat walls forming an open-top square box.
+        R = CUP_OUTER_R          # outer half-width
+        t = CUP_WALL_T
+        inner = R - t            # inner half-width
+        r_mid = R - t / 2.0      # wall centreline offset
         bottom = body.add_geom()
         bottom.name = "cup_bottom"
-        bottom.type = mujoco.mjtGeom.mjGEOM_CYLINDER
-        bottom.size = [CUP_OUTER_R, CUP_BOTTOM_HALF, 0.0]
+        bottom.type = mujoco.mjtGeom.mjGEOM_BOX
+        bottom.size = [R, R, CUP_BOTTOM_HALF]
         bottom.pos = [0.0, 0.0, -CUP_HALF_H + CUP_BOTTOM_HALF]
         bottom.rgba = [0.90, 0.55, 0.62, 1.0]
         _apply_object_material(bottom)
-        r_mid = CUP_OUTER_R - CUP_WALL_T / 2.0
-        seg_tan = math.pi * CUP_OUTER_R / CUP_SEGMENTS * 1.15  # half tangential length, slight overlap
-        for i in range(CUP_SEGMENTS):
-            th = 2.0 * math.pi * i / CUP_SEGMENTS
+        for sy in (1.0, -1.0):   # +Y / -Y walls span the full outer width in x
             g = body.add_geom()
-            g.name = f"cup_wall_{i}"
+            g.name = f"cup_wall_y{'p' if sy > 0 else 'n'}"
             g.type = mujoco.mjtGeom.mjGEOM_BOX
-            g.size = [CUP_WALL_T / 2.0, seg_tan, CUP_HALF_H]
-            g.pos = [r_mid * math.cos(th), r_mid * math.sin(th), 0.0]
-            g.quat = [math.cos(th / 2.0), 0.0, 0.0, math.sin(th / 2.0)]  # rotate about z so local x is radial
+            g.size = [R, t / 2.0, CUP_HALF_H]
+            g.pos = [0.0, sy * r_mid, 0.0]
+            g.rgba = [0.90, 0.55, 0.62, 1.0]
+            _apply_object_material(g)
+        for sx in (1.0, -1.0):   # +X / -X walls span the inner width in y (no corner overlap)
+            g = body.add_geom()
+            g.name = f"cup_wall_x{'p' if sx > 0 else 'n'}"
+            g.type = mujoco.mjtGeom.mjGEOM_BOX
+            g.size = [t / 2.0, inner, CUP_HALF_H]
+            g.pos = [sx * r_mid, 0.0, 0.0]
             g.rgba = [0.90, 0.55, 0.62, 1.0]
             _apply_object_material(g)
     else:
