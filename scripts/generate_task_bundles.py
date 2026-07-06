@@ -77,8 +77,26 @@ def _goto(env, pos, grip=None, n=6):
 
 
 def _sample_obj_xy(rng):
-    """A randomized, reachable object start on the table (matches the old benchmark range)."""
-    return (float(rng.uniform(0.45, 0.55)), float(rng.uniform(-0.15, -0.05)))
+    """A randomized, reachable object start spread across the near half of the table (clear of the
+    fixed place zone at y=0.15). Wider than the old range so the 50 scenarios are visibly distinct."""
+    return (float(rng.uniform(0.42, 0.58)), float(rng.uniform(-0.20, 0.00)))
+
+
+def _random_start_ee(rng):
+    """A randomized reachable EE hover pose above the table -- the per-trial *starting pose* the paper
+    permutes (arXiv 2506.09985 4.2), so start frames differ across the 50 scenarios."""
+    return np.array([rng.uniform(0.42, 0.58), rng.uniform(-0.16, 0.12), rng.uniform(0.36, 0.48)])
+
+
+def _far_pose(rng, ref, lo, hi, min_sep=0.12):
+    """Draw a reachable pose in the box [lo, hi] that is at least ``min_sep`` from ``ref``."""
+    lo = np.asarray(lo); hi = np.asarray(hi)
+    p = rng.uniform(lo, hi)
+    for _ in range(10):
+        if np.linalg.norm(p - ref) >= min_sep:
+            break
+        p = rng.uniform(lo, hi)
+    return p
 
 
 def _base_arrays(env):
@@ -94,21 +112,24 @@ def _base_arrays(env):
 # --------------------------------------------------------------------------- per-task builders
 def build_reach(env, rng, obj):
     env.reset(cube_xy=_sample_obj_xy(rng))
-    home = env.get_ee_state()[:3].copy()
-    target = home + np.array([rng.uniform(0.06, 0.12), rng.uniform(-0.10, 0.02),
-                              rng.uniform(-0.08, -0.02)])
+    start_ee = _random_start_ee(rng)
+    _goto(env, start_ee, n=8)  # randomized starting pose (diversity across trials)
     start_img = env.render("planning")
     arrays = _base_arrays(env)
+    # target: an independent reachable pose, a large move (>= ~0.18 m) from the start
+    ee = env.get_ee_state()[:3]
+    target = _far_pose(rng, ee, lo=[0.42, -0.16, 0.33], hi=[0.60, 0.14, 0.46], min_sep=0.18)
     arrays["target"] = target.astype(float)
     arrays["goal_object"] = env.object_pose()[:3].copy()  # object does not move in a reach
     goal_img = env.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning")
-    _goto(env, target, n=10)  # validate
+    _goto(env, target, n=12)  # validate
     ok = float(np.linalg.norm(env.get_ee_state()[:3] - target)) < 0.02
     return {"start": start_img, "goal": goal_img}, arrays, {"start_grasped": False}, ok
 
 
 def build_grasp(env, rng, obj):
     env.reset(cube_xy=_sample_obj_xy(rng))
+    _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
     start_img = env.render("planning")
     arrays = _base_arrays(env)
     c = env.object_position()
@@ -131,23 +152,23 @@ def build_reach_with_object(env, rng, obj):
     env.reset(cube_xy=_sample_obj_xy(rng))
     c = env.object_position()
     dz = OBJECT_SPECS[obj]["grasp_dz"]
-    # scripted grasp then lift to a start hover -- the object STARTS grasped for this task
+    # scripted grasp then lift to a start hover above the grasp point -- object STARTS grasped
     _goto(env, [c[0], c[1], c[2] + 0.14])
     _goto(env, [c[0], c[1], c[2] + dz])
     _goto(env, [c[0], c[1], c[2] + dz], grip=1.0)
-    start_hover = np.array([c[0], c[1], TABLE_TOP_Z + 0.20])
+    start_hover = np.array([c[0], c[1], TABLE_TOP_Z + 0.22])
     _goto(env, start_hover, grip=1.0)
     if not env.gripper_holds_object():
         return None, None, None, False
     start_img = env.render("planning")
     arrays = _base_arrays(env)  # qpos0 = grasped, object-in-hand state
     ee = env.get_ee_state()[:3]
-    goal_ee = ee + np.array([rng.uniform(-0.08, 0.08), rng.uniform(0.05, 0.16),
-                             rng.uniform(-0.06, 0.03)])
+    # goal: a large, paper-like traverse across the table while holding (>= ~0.20 m)
+    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.20)
     arrays["goal_ee"] = goal_ee.astype(float)
     goal_img = env.capture_goal_image(pos=goal_ee, euler=EE_DOWN, gripper=1.0, camera="planning",
                                       held_object=True)
-    _goto(env, goal_ee, grip=1.0)  # validate the held move
+    _goto(env, goal_ee, grip=1.0, n=10)  # validate the held traverse
     ok = bool(env.gripper_holds_object())
     arrays["goal_object"] = env.object_pose()[:3].copy()
     return {"start": start_img, "goal": goal_img}, arrays, {"start_grasped": True}, ok
@@ -155,6 +176,7 @@ def build_reach_with_object(env, rng, obj):
 
 def build_pick_place(env, rng, obj):
     env.reset(cube_xy=_sample_obj_xy(rng))
+    _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
     start_img = env.render("planning")
     arrays = _base_arrays(env)  # qpos0 = initial, object on the table
     c = env.object_position()
@@ -162,20 +184,22 @@ def build_pick_place(env, rng, obj):
     half = OBJECT_SPECS[obj]["rest_half_z"]
     zone = env.zone_center()
     grasp_pos = np.array([c[0], c[1], c[2] + dz])
+    grasped_pos = np.array([c[0], c[1], c[2] + dz + 0.04])  # grasped + slightly lifted (sub-goal 1)
     vicinity_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + half + 0.12])
     place_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + half + 0.04])
     arrays["grasp_pos"] = grasp_pos.astype(float)
     arrays["vicinity_pos"] = vicinity_pos.astype(float)
     arrays["place_pos"] = place_pos.astype(float)
-    # sub-goal 1: object being grasped (grasp-ready, on the table)
-    goal_1 = env.capture_goal_image(pos=grasp_pos, euler=EE_DOWN, gripper=0.0, camera="planning")
-    # scripted grasp so the held-object sub-goals carry the object correctly
+    # scripted grasp FIRST, so all three sub-goals show the SAME grasp (object held), differing only
+    # in location -- sub-goal 1 = grasped at the object, 2 = held in the vicinity, 3 = placed.
     _goto(env, [c[0], c[1], c[2] + 0.14])
     _goto(env, [c[0], c[1], c[2] + dz])
     _goto(env, [c[0], c[1], c[2] + dz], grip=1.0)
-    _goto(env, [c[0], c[1], c[2] + 0.06], grip=1.0)
+    _goto(env, grasped_pos, grip=1.0)
     if not env.gripper_holds_object():
         return None, None, None, False
+    goal_1 = env.capture_goal_image(pos=grasped_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
+                                    held_object=True)   # cup grasped (rim grip) at its location
     goal_2 = env.capture_goal_image(pos=vicinity_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
                                     held_object=True)
     goal_g = env.capture_goal_image(pos=place_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
