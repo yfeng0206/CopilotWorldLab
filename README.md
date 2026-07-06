@@ -16,7 +16,7 @@ The full roadmap is in [`docs/DESIGN.md`](docs/DESIGN.md#0-project-roadmap-phase
 | Phase | What | State |
 |---|---|---|
 | **0** | Setup + reproduce V-JEPA 2-AC world model | done |
-| **1** | Fixed-bundle closed-loop benchmark: Reach / Grasp / Reach-with-object / Pick-Place x cup/box, 50 trials each | current |
+| **1** | Fixed-bundle closed-loop benchmark: grasp / reach_with_object / grasp_and_reach / pick_place x cup/box, 50 trials each | current |
 | 2 | POV/wrist CNN coarse-to-fine (improvement #1) | planned |
 | 3 | 3rd + first-person cross-attention latent (our method) | planned |
 | 4 | Unified cross-view latent | planned |
@@ -38,20 +38,23 @@ Reproducible experiments with honest, primary-source-verified numbers (see
 - **Closed-loop CEM (Phase 1 pilot)**: reach to a goal image **succeeds** in the control loop;
   the ~3 cm precision floor is diagnosed as a model/interface limit (tracking error only 9 mm).
   [writeup](docs/experiments/cem_closed_loop.md)
-- **Closed-loop task success (Phase 1, in rebuild)**: honest **Reach / Grasp / Reach-with-object /
-  Pick-Place** (the paper's four robot tasks, arXiv 2506.09985 Table 3) on our own MuJoCo env —
-  V-JEPA plans the coarse motion, scripted gripper, hidden-state success. Each task runs on **two
-  objects** (a rim-graspable **cup** and a rigid **box**) on the **same** scene with the target geom
-  swapped, and on **fixed, saved task bundles** (start + sub-goal + goal frames + states + camera per
+- **Closed-loop task success (Phase 1, in rebuild)**: honest **grasp / reach_with_object /
+  grasp_and_reach / pick_place** on our own MuJoCo env. The set is inspired by the V-JEPA 2 robot
+  tasks (arXiv 2506.09985 Table 3) but customized: plain EE-to-point reach was dropped as
+  uninteresting and replaced by the 2-goal **grasp_and_reach** task. V-JEPA plans the coarse motion,
+  with scripted gripper actions and hidden-state success. Each task runs on **two objects** (a
+  rim-graspable **cube cup** and a rigid **box**) on the **same** scene with the target geom swapped,
+  and on **fixed, saved task bundles** (start + sub-goal + goal frames + states + camera per
   scenario, inspectable under `tasks/`), so runs are reproducible and every config is scored on
   identical scenarios. Success = Euclidean delta within a **swept sphere radius `x`** (mean delta +
   success rate reported per `x`). **50 trials per (task, object)** = 400 scenarios. Methodology:
   [closed_loop_benchmark.md](docs/experiments/closed_loop_benchmark.md).
 
-Honest boundary: only Reach is a pure V-JEPA success; grasp/pick-place are V-JEPA coarse motion +
-scripted gripper, scored on hidden privileged sim state. The earlier random-per-trial runs (and their
-committed reports) were cleared in a clean-slate reset to move to the fixed-bundle + two-object design
-above; they remain recoverable from git history.
+Honest boundary: V-JEPA plans spatial motion; gripper actions are scripted, and **grasp** uses a
+scripted lift after the just-grabbed goal to test success. All tasks are scored on hidden privileged
+sim state. The earlier random-per-trial runs (and their committed reports) were cleared in a
+clean-slate reset to move to the fixed-bundle + two-object design above; they remain recoverable from
+git history.
 
 ## Repository layout
 
@@ -59,7 +62,7 @@ above; they remain recoverable from git history.
 src/envs/franka_build.py         Compose Franka Panda + Robotiq 2F-85 (+ cup/box object, place zone, distractors)
 src/envs/franka_droid_env.py     FrankaDroidEnv: real 7-DoF EE control via differential IK + physics
 src/bench/schema.py              Task-bundle schema (start/goal/sub-goal images + states + model XML)
-src/bench/success.py             Hidden success functions (reach / touch / grasp / place)
+src/bench/success.py             Hidden success functions and task gates
 src/bench/thresholds.py          Precision thresholds + physical gate spec per task
 src/envs/robomimic_render.py     Render robomimic raw demos on Windows (reference/image source only)
 src/utils/{ik,geometry,logging,config}.py   IK, SO(3) helpers, JEPA-style logging, YAML config
@@ -71,7 +74,7 @@ scripts/run_closed_loop_benchmark.py  Closed-loop CEM-MPC benchmark; loads fixed
 scripts/energy_landscape_repro.py, render_franka_transitions.py, analyze_frame_rotation.py
 scripts/benchmark_transition_scoring.py, extract_droid_transitions.py, plot_transition_benchmark.py
 scripts/cem_reach_loop.py, plot_cem_loop.py     Closed-loop CEM planning to goal image(s)
-tasks/                           Fixed, inspectable task bundles (reach/grasp/pick_place x cup/box)
+tasks/                           Fixed, inspectable task bundles (grasp/reach_with_object/grasp_and_reach/pick_place x cup/box)
 tests/                           Geometry, Franka env, grasp physics, success, thresholds, utils
 docs/                            architecture, DESIGN, experiments/, research_log, lessons_learned, ...
 ```

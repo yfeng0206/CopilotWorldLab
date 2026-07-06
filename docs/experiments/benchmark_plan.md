@@ -143,8 +143,9 @@ dataset before proving the method. This intentionally deprioritizes the earlier 
   a benchmark.
 - Benchmark (1), transition scoring, is the **first real benchmark with a vanilla baseline**.
 - Closed-loop **task-success** on our own MuJoCo `FrankaDroidEnv` is the Phase-1 benchmark, measured
-  on **fixed, saved task bundles** over the paper's four robot tasks (Reach / Grasp / Reach-with-object
-  / Pick-Place) x **cup/box** (hidden-state success as delta within a swept sphere `x`, no robomimic
+  on **fixed, saved task bundles** over **grasp / reach_with_object / grasp_and_reach / pick_place** x
+  **cup/box**. This is inspired by the paper's robot tasks but drops plain reach and adds the 2-goal
+  grasp_and_reach composition (hidden-state success as delta within a swept sphere `x`, no robomimic
   dependency; see [closed_loop_benchmark.md](closed_loop_benchmark.md)). Official established-suite
   closed-loop *rollout* success (robosuite/ManiSkill) is still benchmark (2), gated on Linux/WSL2.
 

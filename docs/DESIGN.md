@@ -17,14 +17,15 @@ a single unified latent. We are currently on **Phase 1**. The technical flow for
   DROID, and closed-loop CEM to goal images. Build our own honest MuJoCo grasp/place env
   (real physics + hidden success) since robosuite's runtime is Windows-blocked.
 - **Phase 1 -- Fixed-bundle closed-loop benchmark (current).** Run the closed-loop task-success
-  benchmark on **fixed, saved task bundles** (reproducible, inspectable) over the paper's **four robot
-  tasks** (Reach / Grasp / Reach-with-object / Pick-Place; arXiv 2506.09985 Table 3) and **two
-  objects** (a rim-graspable **cup** and a rigid **box**) on the same env with the target geom
-  swapped, **50 trials per (task, object)** (400 bundles). Success is judged from hidden privileged
-  sim state as a Euclidean delta within a swept sphere radius `x` (mean delta + success@x). Ablation
-  axes: **CEM population** (200 vs 400 vs 800 samples) and, later, `W*` frame calibration and a
-  fine-tuned predictor -- each scored on the identical bundle set. See
-  [`experiments/closed_loop_benchmark.md`](experiments/closed_loop_benchmark.md).
+  benchmark on **fixed, saved task bundles** (reproducible, inspectable) over a Table-3-inspired but
+  customized task set: **grasp**, **reach_with_object**, **grasp_and_reach**, and **pick_place**.
+  Plain EE-to-point reach was dropped as uninteresting and replaced by the 2-goal
+  **grasp_and_reach** composition. Each task runs on **two objects** (a rim-graspable **cube cup** and
+  a rigid **box**) on the same env with the target geom swapped, **50 trials per (task, object)** (400
+  bundles). Success is judged from hidden privileged sim state as a Euclidean delta within a swept
+  sphere radius `x` (mean delta + success@x). Ablation axes: **CEM population** (200 vs 400 vs 800
+  samples) and, later, `W*` frame calibration and a fine-tuned predictor -- each scored on the
+  identical bundle set. See [`experiments/closed_loop_benchmark.md`](experiments/closed_loop_benchmark.md).
 - **Phase 2 -- POV/wrist CNN coarse-to-fine (improvement #1).** Add a CNN backbone for the
   first-person **wrist** view. V-JEPA plans the coarse approach (third-person); when it stalls, a
   CNN-based classical image matcher/servo takes over for the fine, close-range motion. Flow:

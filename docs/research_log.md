@@ -13,6 +13,20 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-06 -- Closed-loop task-set update
+
+#### 19. Drop plain reach; add 2-goal grasp_and_reach
+**Context**: `scripts/generate_task_bundles.py` is now the source of truth for the fixed-bundle
+closed-loop benchmark task set. The benchmark loads saved bundles from `tasks/<task>/<object>/<id>/`;
+it does not randomize scenarios at evaluation time.
+**Decision / design**: The current 400-bundle set is **grasp / reach_with_object / grasp_and_reach /
+pick_place** x **cup/box** x 50. Plain EE-to-point reach was dropped as uninteresting. The new
+**grasp_and_reach** task starts with the object on the table, uses `goal_1` for the just-grabbed state,
+then uses `goal` for the held-object reach target.
+**Task details**: **grasp** has one just-grabbed goal image (closed gripper on the object, still on
+the table); V-JEPA performs the grasp reach and a scripted lift tests success afterward. The cup is a
+**cube cup** (open-top square box) grasped on one wall's rim, with one finger inside and one outside.
+
 ### 2026-07-05 -- Clean-slate reset + fixed-bundle, two-object benchmark redesign
 
 #### 18. Move from random-per-trial scenarios to fixed, saved task bundles (cup + box)
@@ -33,13 +47,12 @@ camera/energy ablations, cem_loop) and `archive/` scaffolding, and the untracked
 landscape images) and old `tasks/` bundles; kept `logs/`. All committed removals recoverable from git
 history. (2) **Fixed bundles** -- a scripted expert generates each scenario once
 (`scripts/generate_task_bundles.py`) and the benchmark loads them (`--bundles`), replacing
-`_rand_cube_xy`. (3) **Two objects** -- rim-graspable **cup** (procedural thin-wall open cylinder) and
-a single rigid **box** block, on **one env** with the target geom swapped; static distractors for
-realism. (4) **Tasks & counts** -- the paper's four robot tasks (Reach / Grasp / Reach-with-object /
-Pick-Place; arXiv 2506.09985 Table 3) x 2 objects x 50 = 400 bundles; success = Euclidean delta within
-a swept sphere radius `x` (reach = EE-to-target; grasp = scripted close+lift; reach_with_object = held
-object to goal, never dropped; pick_place = object at final goal, released, 4/10/4). No robomimic
-dependency.
+`_rand_cube_xy`. (3) **Two objects** -- rim-graspable **cube cup** (open-top square box, one-wall rim
+grasp) and a single rigid **box** block, on **one env** with the target geom swapped; static
+distractors for realism. (4) **Tasks & counts** -- **grasp / reach_with_object / grasp_and_reach /
+pick_place** x 2 objects x 50 = 400 bundles, inspired by the paper's robot tasks but customized to
+drop plain reach and add the 2-goal grasp_and_reach task. Success = Euclidean delta within a swept
+sphere radius `x` plus task physical gates. No robomimic dependency.
 **Outcome**: All design/plan/experiment docs updated to the new design (README, DESIGN, plan,
 experiments/README, benchmark_plan, closed_loop_success_plan, closed_loop_benchmark rewritten;
 historical docs bannered). Build in progress: env objects -> bundle generator -> `--bundles` loader ->
@@ -68,9 +81,10 @@ cube (high friction, ~26 g) and `add_zone` a place-target marker; `FrankaDroidEn
 (`object_pose/position/speed/tilt`, `zone_center`, `gripper_holds_object`). Physics validated: cube
 rests stably (z=0.24, v=0); scripted descend->close->lift grasps and lifts it (dz +0.14 m,
 held=True). 34 tests pass; defaults keep the arm-only env unchanged.
-**Outcome**: foundation ready for the paper-aligned 3 tasks (Reach/Grasp-lift/Pick-and-place). Next:
-scripted expert -> sub-goal images -> task bundles + contact sheet/GIF for visual approval, then the
-CEM benchmark runner + staged runs. Plan: `docs/experiments/closed_loop_success_plan.md`.
+**Outcome**: foundation ready for the then-current paper-aligned 3-task runner (now superseded by the
+2026-07-06 fixed-bundle task set). Next: scripted expert -> sub-goal images -> task bundles + contact
+sheet/GIF for visual approval, then the CEM benchmark runner + staged runs. Plan:
+`docs/experiments/closed_loop_success_plan.md`.
 
 #### 16. Robomimic images blocked on Windows -> DROID real baseline (benchmark 1 hardened)
 **Context**: Plan was robomimic offline datasets (Lift/Can/Square) for grasp/place transition

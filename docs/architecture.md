@@ -99,11 +99,11 @@ before trusting zero-shot planning (see the camera ablation in
 
 | Component | Where | Role |
 |---|---|---|
-| `FrankaDroidEnv` | `src/envs/franka_droid_env.py` | DROID-style Franka + Robotiq 2F-85, real IK control + physics; renders the planning camera; `add_object`/`add_zone` graspable cube + place zone; privileged truth accessors (`object_pose/speed/tilt`, `gripper_holds_object`, `object_released`) |
-| Scene builder | `src/envs/franka_build.py` | composes arm + gripper + table + cube/zone via `mjSpec`; `PLANNING_CAMERA` (validated az45_el45 view) |
+| `FrankaDroidEnv` | `src/envs/franka_droid_env.py` | DROID-style Franka + Robotiq 2F-85, real IK control + physics; renders the planning camera; `add_object`/`add_zone` cup/box objects + place zone; privileged truth accessors (`object_pose/speed/tilt`, `gripper_holds_object`, `object_released`) |
+| Scene builder | `src/envs/franka_build.py` | composes arm + gripper + table + cube-cup/box/zone via `mjSpec`; `PLANNING_CAMERA` (validated az45_el45 view) |
 | V-JEPA 2-AC world model | vendored `third_party/vjepa2` (loaded namespace-isolated) | frozen ViT-g encoder `E` + 305M action-conditioned predictor `P` |
 | CEM planner | vendored `notebooks/utils/mpc_utils.py::cem` | population MPC to a goal latent; config in [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) |
-| Hidden success | `src/bench/success.py` | reach / touch / grasp-lift / place verdicts on privileged sim state |
+| Hidden success | `src/bench/success.py` | task-gate verdicts on privileged sim state |
 | Task bundles | `src/bench/schema.py` | start/goal images + states + model XML for a benchmark task |
 
 ## 7. Planner config (verified from released code)
