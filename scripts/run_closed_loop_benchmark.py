@@ -1018,6 +1018,14 @@ def main() -> None:
                    help="save GIFs only for ~3 best/median/worst trials (default on)")
     args = p.parse_args()
 
+    # Stop-guard: if this flag file exists, exit immediately (before loading the model). Lets a
+    # detached multi-run launcher be halted cleanly -- already-running invocations finish from their
+    # loaded bytecode, while the NEXT fresh invocation reads this and no-ops. Remove the file to resume.
+    _stop_flag = os.path.join(_REPO_ROOT, "logs", "full_bench", "STOP")
+    if os.path.exists(_stop_flag):
+        logger.warning("STOP flag present (%s) -- exiting without running.", _stop_flag)
+        return
+
     if not os.path.exists(CHECKPOINT):
         logger.error("missing checkpoint: %s", CHECKPOINT)
         raise SystemExit(1)
