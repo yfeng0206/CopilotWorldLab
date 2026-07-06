@@ -176,6 +176,21 @@ class FrankaDroidEnv:
         for _ in range(int(settle)):
             self._mujoco.mj_step(self.model, self.data)
 
+    def set_state(self, qpos, qvel=None, gripper=None, settle=0) -> None:
+        """Restore a full simulator state: set ``qpos`` (and optional ``qvel``), hold the arm servo
+        targets at the loaded arm pose, and optionally set the gripper command; then settle. Used by
+        the benchmark to load a saved task bundle so a trial starts from the exact recorded scenario
+        (``gripper=1.0`` for a start-grasped task so the closed gripper holds the object)."""
+        self.data.qpos[:] = np.asarray(qpos, dtype=np.float64).reshape(self.model.nq)
+        self.data.qvel[:] = 0.0 if qvel is None else np.asarray(qvel, dtype=np.float64).reshape(self.model.nv)
+        self.data.ctrl[:ARM_DOF] = self.data.qpos[:ARM_DOF]   # servos hold the loaded arm pose
+        if gripper is not None:
+            self._set_gripper_cmd(gripper)
+        self.last_action_ok = True
+        self._mujoco.mj_forward(self.model, self.data)
+        for _ in range(int(settle)):
+            self._mujoco.mj_step(self.model, self.data)
+
     def move_held_to(self, pos=None, euler=None, gripper=None, upright: bool = False) -> None:
         """Kinematically carry the currently-held object to a new EE pose, keeping the object's pose
         *relative to the gripper* fixed (so a held object stays in its grasp orientation). Leaves the

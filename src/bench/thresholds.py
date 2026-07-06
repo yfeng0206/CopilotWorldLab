@@ -15,6 +15,10 @@ THRESHOLDS = {
     "grasp_lift": [0.06, 0.05, 0.03, 0.02],
     "place": [0.10, 0.06, 0.03, 0.015],
     "pick_place": [0.10, 0.06, 0.03, 0.015],
+    # fixed-bundle task set (swept sphere radius x, metres, tight -> loose)
+    "grasp": [0.06, 0.03, 0.02],
+    "reach_with_object": [0.10, 0.06, 0.03, 0.015],
+    "grasp_and_reach": [0.10, 0.06, 0.03, 0.015],
 }
 
 # The physical gates that must ALSO hold (beyond the precision threshold) for a real success.
@@ -24,6 +28,10 @@ GATE_SPEC = {
     "grasp_lift": ["lifted", "held", "upright", "stable"],
     "place": ["upright", "stable", "released"],
     "pick_place": ["grasped", "upright", "stable", "released"],
+    # fixed-bundle task set
+    "grasp": ["lifted", "held", "upright", "stable"],
+    "reach_with_object": ["held", "upright"],
+    "grasp_and_reach": ["held", "upright"],
 }
 
 
