@@ -90,9 +90,13 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
       trial; **400 bundles** under `tasks/` (grasp/reach_with_object/grasp_and_reach/pick_place x
       cup/box x 50, 0 skipped), inspected + approved via `scripts/inspect_task_viewer.py` (live
       MuJoCo window, N/B to step stages).
-- [ ] **`--bundles` loader:** make `run_closed_loop_benchmark.py` LOAD the fixed bundles (restore
-      qpos0, use saved goal images, handle `start_grasped`) instead of `_rand_cube_xy`; add tests;
-      then run at samples 200/400/800.
+- [x] **`--bundles` loader:** `run_closed_loop_benchmark.py --bundles tasks` LOADS the fixed bundles
+      (`env.set_state` restores qpos0 + zone, honors `start_grasped`, plans to the saved goal/sub-goal
+      images, auto-switches sub-goals on the step budget, scripts only the gripper, scores
+      object-in-zone + released with the swept sphere `x`). Smoke-validated end-to-end; new task
+      thresholds/gates in `src/bench/thresholds.py`.
+- [ ] **Full run + report:** run at samples 200 (then 400/800) over grasp / reach_with_object /
+      grasp_and_reach / pick_place x cup/box (50 each); publish per (task, object) precision curves.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 

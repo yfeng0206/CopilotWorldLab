@@ -13,6 +13,24 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-06 -- Fixed-bundle benchmark loader (`--bundles`)
+
+#### 19. Run the closed-loop benchmark on the fixed saved bundles instead of randomizing
+**Context**: the 400 approved task bundles (grasp / reach_with_object / grasp_and_reach / pick_place x
+cup/box x 50) needed to drive the benchmark so every config is scored on identical, inspectable
+scenarios.
+**Implementation**: `run_closed_loop_benchmark.py --bundles <dir>` iterates (task, object), loads each
+`TaskBundle`, restores the exact recorded start with a new `FrankaDroidEnv.set_state(qpos0)` (+
+`set_zone_xy`, honoring `start_grasped`), plans V-JEPA CEM-MPC to the SAVED goal/sub-goal images
+(auto-switching sub-goals on the step budget, pick_place 4/10/4), scripts only the gripper, and scores
+from hidden privileged state with the swept sphere `x`. New THRESHOLDS/GATE_SPEC for the four tasks in
+`src/bench/thresholds.py`. Reports per (task, object).
+**Outcome**: smoke run (grasp + pick_place, cup, samples 100) works end-to-end. State restore
+verified. Two fairness caveats to revisit (audit): the grasp goal shows a closed gripper (V-JEPA plans
+with its own gripper open), and the rim-cup scripted release in pick_place can fail `released` even
+when the object lands in the zone (same one-wall hooking seen at generation time). Full n=50 /
+samples=200 run pending to compare against the earlier random-cube baseline.
+
 ### 2026-07-06 -- Closed-loop task-set update
 
 #### 19. Drop plain reach; add 2-goal grasp_and_reach

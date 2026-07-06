@@ -182,18 +182,41 @@ objective = mean-L1 in layer-norm'd latent with the gripper axis frozen · reced
 (~16 GB); the 400/800 sample ablations use the chunked predictor to avoid OOM. See
 [../architecture.md](../architecture.md#7-planner-config-verified-from-released-code).)
 
+## Bundle loader (how a run executes)
+
+`--bundles <dir>` switches the runner from randomizing per trial to LOADING the fixed scenarios under
+`<dir>/<task>/<object>/`. For each bundle a trial runs as:
+
+1. **Restore the exact recorded start** — `env.set_state(qpos0)` loads the saved joint/object state and
+   camera; the place zone is restored from the saved `zone` (mocap). `start_grasped` tasks
+   (reach_with_object) load with the gripper closed so it holds the object.
+2. **Plan to the saved goal images** — each sub-goal is the saved `goal_1/goal_2/goal.png`. CEM-MPC
+   replans every step from `(current frame + goal image)`; the gripper axis is frozen (V-JEPA plans
+   only the arm).
+3. **Auto-switch sub-goals** — like the released V-JEPA 2-AC pick-and-place schedule, sub-goals switch
+   on a fixed step budget (pick_place **4 / 10 / 4**); single-goal stages early-stop when the EE
+   reaches the target (`pos_tol`).
+4. **Script only the gripper** at transitions (close after the grasp goal; open after the place goal)
+   and, for `grasp`, a scripted lift that tests the grasp.
+5. **Score from hidden privileged state** — Euclidean delta within the swept sphere `x` plus the
+   task's physical gates. For **pick_place** success only requires the object to land in the zone and
+   be released (the arm's distance from the object is ignored).
+
+The run is deterministic (fixed bundles + seeded CEM); every config (samples, `W*`, fine-tuned vs
+vanilla predictor) is scored on the identical scenarios.
+
 ## How to run
 
 ```
 # 1) generate the fixed bundles (scripted expert; CPU/GL, no world model)
 python scripts/generate_task_bundles.py --tasks grasp reach_with_object grasp_and_reach pick_place --objects cup box --trials 50
 
-# 2) run the benchmark on the saved bundles (loads tasks/..., deterministic)
+# 2) run the benchmark on the saved bundles (loads tasks/..., deterministic; reports per task x object)
 python scripts/run_closed_loop_benchmark.py --bundles tasks --tasks grasp reach_with_object grasp_and_reach --objects cup box --tag full
 python scripts/run_closed_loop_benchmark.py --bundles tasks --tasks pick_place --objects cup box --tag full
 
-# 3) side-by-side ground-truth vs V-JEPA demo GIF
-python scripts/run_closed_loop_benchmark.py --demo grasp_and_reach
+# defaults follow Meta's released config: samples 200, cem_steps 10, T=2, topk 10, maxnorm 0.05,
+# momentum 0.15/0.15. Sample ablation: add --samples 400 (then 800, which uses the chunked predictor).
 ```
 
 ## Demo: ground truth vs V-JEPA
