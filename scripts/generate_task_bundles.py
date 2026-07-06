@@ -5,20 +5,20 @@ inspectable *task bundle* (start / sub-goal / goal frames + privileged states + 
 sheet; see src/bench/schema.py). The closed-loop benchmark then LOADS these bundles instead of
 randomizing per trial, so every config is scored on identical scenarios.
 
-Tasks (paper's four robot tasks, arXiv 2506.09985 Table 3):
-    reach              EE to a goal pose (object in scene)           -- 1 goal image
-    grasp              reach the grasp pose; scripted close + lift   -- 1 goal image
-    reach_with_object  object STARTS grasped; move it to a goal      -- 1 goal image (start grasped)
-    pick_place         grasp -> vicinity -> place, fixed 4/10/4      -- goal_1, goal_2, goal
+Tasks (V-JEPA plans the coarse motion; scripted gripper; based on arXiv 2506.09985 Table 3):
+    grasp              V-JEPA grasps; a scripted lift tests success   -- 1 goal (just grabbed)
+    reach_with_object  object STARTS grasped; move it to a goal       -- 1 goal (start grasped)
+    grasp_and_reach    grasp off the table, then reach with it        -- 2 goals (goal_1, goal)
+    pick_place         grasp -> vicinity -> place, fixed 4/10/4       -- 3 goals (goal_1, goal_2, goal)
 
-Objects: cup (rim-graspable) and box (rigid block). Layout:
+Objects: cup (cube cup, rim-graspable) and box (rigid block). Layout:
     tasks/<task>/<object>/<task>_<object>_<NN>/ { meta.json, start.png, goal[_1,_2].png,
                                                   arrays.npz, contact_sheet.png }
 
 Every scenario is validated (the scripted expert must complete it) before it is saved, so each
 bundle has a well-defined, measurable hidden success/failure.
 
-    python scripts/generate_task_bundles.py --tasks reach grasp reach_with_object pick_place \
+    python scripts/generate_task_bundles.py --tasks grasp reach_with_object grasp_and_reach pick_place \
         --objects cup box --trials 50
 """
 from __future__ import annotations
@@ -50,14 +50,14 @@ from src.utils.logging import get_logger  # noqa: E402
 logger = get_logger("generate_task_bundles")
 
 EE_DOWN = [np.pi, 0.0, 0.0]  # gripper pointing down (extrinsic XYZ euler), matches the benchmark
-ALL_TASKS = ["reach", "grasp", "reach_with_object", "pick_place"]
+ALL_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
 ALL_OBJECTS = ["cup", "box"]
 
 # Precision sphere-radius sweep per task (metres); success@x = delta < x AND physical gates.
 X_SWEEP = {
-    "reach": [0.05, 0.03, 0.015],
     "grasp": [0.06, 0.03, 0.02],
     "reach_with_object": [0.06, 0.03, 0.015],
+    "grasp_and_reach": [0.06, 0.03, 0.015],
     "pick_place": [0.10, 0.06, 0.03, 0.015],
 }
 
@@ -121,21 +121,35 @@ def _base_arrays(env):
 
 
 # --------------------------------------------------------------------------- per-task builders
-def build_reach(env, rng, obj):
+def build_grasp_and_reach(env, rng, obj):
+    """2-goal compositional task: V-JEPA grasps the object off the table (goal_1), then reaches with
+    it to a target (goal). Object starts on the table (unlike reach_with_object, which starts held)."""
     env.reset(cube_xy=_sample_obj_xy(rng))
-    start_ee = _random_start_ee(rng)
-    _goto(env, start_ee, n=8)  # randomized starting pose (diversity across trials)
+    _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
     start_img = env.render("planning")
-    arrays = _base_arrays(env)
-    # target: an independent reachable pose, a large move (>= ~0.18 m) from the start
+    arrays = _base_arrays(env)  # qpos0 = initial, object on the table
+    c = env.object_position()
+    approach, grasp = _grasp_points(obj, c)
+    arrays["grasp_pos"] = grasp.astype(float)
+    # goal_1: object just grabbed (gripper closed) at its location, on the table
+    _goto(env, approach)
+    _goto(env, grasp)
+    _goto(env, grasp, grip=1.0)
+    if not env.gripper_holds_object():
+        return None, None, None, False
+    goal_1 = env.capture_goal_image(pos=grasp, euler=EE_DOWN, gripper=1.0, camera="planning",
+                                    held_object=True)
+    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for the reach
     ee = env.get_ee_state()[:3]
-    target = _far_pose(rng, ee, lo=[0.42, -0.16, 0.33], hi=[0.60, 0.14, 0.46], min_sep=0.18)
-    arrays["target"] = target.astype(float)
-    arrays["goal_object"] = env.object_pose()[:3].copy()  # object does not move in a reach
-    goal_img = env.capture_goal_image(pos=target, euler=EE_DOWN, camera="planning")
-    _goto(env, target, n=12)  # validate
-    ok = float(np.linalg.norm(env.get_ee_state()[:3] - target)) < 0.02
-    return {"start": start_img, "goal": goal_img}, arrays, {"start_grasped": False}, ok
+    # goal: reach with the held object to a far target (>= ~0.18 m)
+    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.18)
+    arrays["goal_ee"] = goal_ee.astype(float)
+    goal_g = env.capture_goal_image(pos=goal_ee, euler=EE_DOWN, gripper=1.0, camera="planning",
+                                    held_object=True)
+    _goto(env, goal_ee, grip=1.0, n=10)  # validate the held reach
+    ok = bool(env.gripper_holds_object())
+    arrays["goal_object"] = env.object_position().copy()
+    return {"start": start_img, "goal_1": goal_1, "goal": goal_g}, arrays, {"start_grasped": False}, ok
 
 
 def build_grasp(env, rng, obj):
@@ -145,18 +159,22 @@ def build_grasp(env, rng, obj):
     arrays = _base_arrays(env)
     c = env.object_position()
     approach, grasp = _grasp_points(obj, c)
-    grasped_pos = grasp + np.array([0.0, 0.0, 0.14])  # grasped + clearly lifted
     arrays["grasp_pos"] = grasp.astype(float)
-    # scripted grasp -> the goal shows the object GRASPED (gripper closed on it), lifted
+    # V-JEPA plans only the grasp reach; the goal shows the object JUST GRABBED (gripper closed) at
+    # its location, NOT lifted. The lift is scripted afterward -- success = off the table + not
+    # dropped. (V-JEPA doing the lift itself would be the reach_with_object task.)
     _goto(env, approach)
     _goto(env, grasp)
     _goto(env, grasp, grip=1.0)
+    if not env.gripper_holds_object():
+        return None, None, None, False
+    goal_img = env.capture_goal_image(pos=grasp, euler=EE_DOWN, gripper=1.0, camera="planning",
+                                      held_object=True)    # just grabbed, still on the table
+    arrays["goal_object"] = env.object_position().copy()   # object at the grabbed pose (not lifted)
+    # validate the grasp is liftable: scripted lift, off the table, not dropped
     z0 = env.object_position()[2]
-    _goto(env, grasped_pos, grip=1.0)
+    _goto(env, grasp + np.array([0.0, 0.0, 0.14]), grip=1.0)
     ok = bool(env.gripper_holds_object()) and (env.object_position()[2] - z0) > 0.04
-    goal_img = env.capture_goal_image(pos=grasped_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                      held_object=True)
-    arrays["goal_object"] = env.object_pose()[:3].copy()
     return {"start": start_img, "goal": goal_img}, arrays, {"start_grasped": False}, ok
 
 
@@ -231,9 +249,9 @@ def build_pick_place(env, rng, obj):
 
 
 BUILDERS = {
-    "reach": build_reach,
     "grasp": build_grasp,
     "reach_with_object": build_reach_with_object,
+    "grasp_and_reach": build_grasp_and_reach,
     "pick_place": build_pick_place,
 }
 
@@ -311,7 +329,7 @@ def main():
 
 def hash_offset(task):
     """Stable per-task seed offset (not Python's randomized string hash)."""
-    return {"reach": 0, "grasp": 1, "reach_with_object": 2, "pick_place": 3}[task]
+    return {"grasp": 0, "reach_with_object": 1, "grasp_and_reach": 2, "pick_place": 3}[task]
 
 
 if __name__ == "__main__":
