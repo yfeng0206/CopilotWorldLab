@@ -126,6 +126,21 @@ def _grasp_points(obj, c):
     return approach, grasp
 
 
+def _grasp_object(env, obj):
+    """Deterministic straight-down rim grasp: the gripper is commanded EE_DOWN at the FIXED grasp
+    offset from the object, then closed -- so the grip is identical *relative to the object* at any
+    table xy (gripper pointing straight down, one finger inside the cup, one outside). Returns
+    (grasp_pos, held). Uses set_ee_pose to enforce the straight-down orientation (a position-only
+    move drifts the gripper by ~15-25 deg, which tilts the object and dips the gripper into the cup)."""
+    c = env.object_position()
+    approach, grasp = _grasp_points(obj, c)
+    env.set_ee_pose(pos=approach, euler=EE_DOWN, gripper=0.0)   # straight down, open, above the object
+    env.set_ee_pose(pos=grasp, euler=EE_DOWN, gripper=0.0)      # straight down at the grasp offset
+    for _ in range(5):
+        env.apply_action(np.array([0., 0., 0., 0., 0., 0., 1.0]))  # close on the wall
+    return grasp, env.gripper_holds_object()
+
+
 def _base_arrays(env):
     return {
         "qpos0": env.data.qpos.copy(),
@@ -138,10 +153,11 @@ def _base_arrays(env):
 
 
 # --------------------------------------------------------------------------- per-task builders
-# Design: the scripted expert PHYSICALLY performs each stage and we render the LIVE state at each
-# checkpoint (env.render). We never teleport-carry the object into a goal pose -- so every goal image
-# is exactly what MuJoCo physics produces (object where it really is: on the table when just grabbed,
-# held when lifted), which is what makes success/failure measurable and the frames trustworthy.
+# Design: the scripted expert PHYSICALLY grasps (validating the grip) and we render the LIVE state for
+# on-table checkpoints (start, "just grabbed" goals). For HELD checkpoints we carry the object
+# KINEMATICALLY with the gripper (env.move_held_to), keeping its upright grasp pose -- a physical
+# one-wall-rim transport swings/tilts the object, which is a sim artifact, not the intended target.
+# The placed goal is built directly (object resting in the zone, arm just above, gripper open).
 
 def build_grasp(env, rng, obj):
     """V-JEPA plans ONLY the grasp reach. Goal = object JUST GRABBED (gripper closed on it, still on
@@ -153,10 +169,8 @@ def build_grasp(env, rng, obj):
     c = env.object_position()
     approach, grasp = _grasp_points(obj, c)
     arrays["grasp_pos"] = grasp.astype(float)
-    _goto(env, approach)
-    _goto(env, grasp)
-    _goto(env, grasp, grip=1.0)
-    if not env.gripper_holds_object():
+    grasp, held = _grasp_object(env, obj)          # deterministic straight-down rim grasp
+    if not held:
         return None, None, None, False
     goal_img = env.render("planning")                      # LIVE: object on the table, gripped
     arrays["qpos_goal"] = env.data.qpos.copy()
@@ -172,23 +186,20 @@ def build_reach_with_object(env, rng, obj):
     """Object STARTS grasped + lifted; V-JEPA moves the held object to a goal (paper-like traverse)."""
     env.reset(cube_xy=_sample_obj_xy(rng))
     c = env.object_position()
-    approach, grasp = _grasp_points(obj, c)
-    _goto(env, approach)
-    _goto(env, grasp)
-    _goto(env, grasp, grip=1.0)
-    start_hover = np.array([grasp[0], grasp[1], TABLE_TOP_Z + 0.22])
-    _goto(env, start_hover, grip=1.0)
-    if not env.gripper_holds_object():
+    half = OBJECT_SPECS[obj]["rest_half_z"]
+    grasp, held = _grasp_object(env, obj)          # deterministic straight-down rim grasp
+    if not held:
         return None, None, None, False
-    start_img = env.render("planning")                     # LIVE: object held, lifted at the start
+    # start: kinematically carry the held (upright) object to a start hover over its pickup spot
+    start_hover = np.array([grasp[0], grasp[1], TABLE_TOP_Z + half + 0.16])
+    env.move_held_to(pos=start_hover, euler=EE_DOWN, gripper=1.0, upright=True)
+    start_img = env.render("planning")                     # object held upright, lifted at the start
     arrays = _base_arrays(env)  # qpos0 = grasped, object-in-hand state
     ee = env.get_ee_state()[:3]
-    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.20)
+    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.32], hi=[0.60, 0.24, 0.46], min_sep=0.20)
     arrays["goal_ee"] = goal_ee.astype(float)
-    _goto(env, goal_ee, grip=1.0, n=10)                    # physically move while holding
-    if not env.gripper_holds_object():
-        return None, None, None, False                     # dropped -> invalid
-    goal_img = env.render("planning")                      # LIVE: object at goal, held
+    env.move_held_to(pos=goal_ee, euler=EE_DOWN, gripper=1.0, upright=True)  # carry upright to the goal
+    goal_img = env.render("planning")                      # object at goal, held upright
     arrays["qpos_goal"] = env.data.qpos.copy()
     ok = True
     arrays["goal_object"] = env.object_position().copy()
@@ -205,21 +216,16 @@ def build_grasp_and_reach(env, rng, obj):
     c = env.object_position()
     approach, grasp = _grasp_points(obj, c)
     arrays["grasp_pos"] = grasp.astype(float)
-    _goto(env, approach)
-    _goto(env, grasp)
-    _goto(env, grasp, grip=1.0)
-    if not env.gripper_holds_object():
+    grasp, held = _grasp_object(env, obj)          # deterministic straight-down rim grasp
+    if not held:
         return None, None, None, False
     goal_1 = env.render("planning")                        # LIVE: just grabbed, on the table
     arrays["qpos_goal_1"] = env.data.qpos.copy()
-    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for the reach
     ee = env.get_ee_state()[:3]
-    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.18)
+    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.32], hi=[0.60, 0.24, 0.46], min_sep=0.18)
     arrays["goal_ee"] = goal_ee.astype(float)
-    _goto(env, goal_ee, grip=1.0, n=10)                    # physically reach while holding
-    if not env.gripper_holds_object():
-        return None, None, None, False
-    goal_g = env.render("planning")                        # LIVE: held object at the target
+    env.move_held_to(pos=goal_ee, euler=EE_DOWN, gripper=1.0, upright=True)  # carry held object upright to goal
+    goal_g = env.render("planning")                        # held object at the target, upright
     arrays["qpos_goal"] = env.data.qpos.copy()
     ok = True
     arrays["goal_object"] = env.object_position().copy()
@@ -239,27 +245,24 @@ def build_pick_place(env, rng, obj):
     zone = env.zone_center()
     approach, grasp = _grasp_points(obj, c)
     arrays["grasp_pos"] = grasp.astype(float)
-    _goto(env, approach)
-    _goto(env, grasp)
-    _goto(env, grasp, grip=1.0)
-    if not env.gripper_holds_object():
+    grasp, held = _grasp_object(env, obj)          # deterministic straight-down rim grasp
+    if not held:
         return None, None, None, False
     goal_1 = env.render("planning")                        # LIVE: just grabbed, on the table
     arrays["qpos_goal_1"] = env.data.qpos.copy()
-    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0, n=8)  # gentle lift for transport
-    # the object hangs off the TCP by the grasp offset (rim grasp); shift the transport targets by
-    # that hold offset so the OBJECT -- not the gripper -- ends over the zone.
-    hold_off = env.get_ee_state()[:3] - env.object_position()
-    vicinity_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.05])
+    # goal_2: kinematically carry the held (upright) object to just above the zone -- no transport tilt
+    ox, oy = OBJECT_SPECS[obj]["grasp_off"]
+    dz = OBJECT_SPECS[obj]["grasp_dz"]
+    vicinity_pos = np.array([zone[0] + ox, zone[1] + oy, TABLE_TOP_Z + half + 0.05 + dz])
+    env.move_held_to(pos=vicinity_pos, euler=EE_DOWN, gripper=1.0, upright=True)
     arrays["vicinity_pos"] = vicinity_pos.astype(float)
-    _goto(env, vicinity_pos, grip=1.0, n=10)               # gentle carry to reduce swing/tilt
-    goal_2 = env.render("planning")                        # LIVE: held in the vicinity of the zone
+    goal_2 = env.render("planning")                        # held upright in the vicinity of the zone
     arrays["qpos_goal_2"] = env.data.qpos.copy()
-    # Build the PLACED goal as the intended target state: retract the arm open above the zone and set
-    # the object resting upright IN the zone, then settle. (A physical one-wall-rim release is too
-    # flaky -- the inside finger hooks the cup -- but the placed goal image is a legitimate target, so
-    # we construct it directly and verify it is a valid resting state.)
-    env.set_ee_pose(pos=[zone[0], zone[1], TABLE_TOP_Z + 0.30], euler=EE_DOWN, gripper=0.0)
+    # Build the PLACED goal as the intended target state: the arm just above the placed object with
+    # the gripper open (paper-style final goal), and the object resting upright IN the zone. (A
+    # physical one-wall-rim release is too flaky -- the inside finger hooks the cup -- but the placed
+    # goal image is a legitimate target, so we construct it directly and verify it is a valid rest.)
+    env.set_ee_pose(pos=[zone[0], zone[1], TABLE_TOP_Z + half + 0.10], euler=EE_DOWN, gripper=0.0)
     for _ in range(4):
         env.apply_action(np.array([0., 0., 0., 0., 0., 0., -1.0]))  # open the fingers, hold the pose
     env.place_object(zone[0], zone[1])                     # object settles upright in the zone

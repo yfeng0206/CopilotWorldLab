@@ -60,7 +60,7 @@ CUP_BOTTOM_HALF = 0.006    # bottom plate half-thickness (thick -> bottom-heavy,
 OBJECT_SPECS = {
     "cube": {"rest_half_z": CUBE_HALF, "grasp": "top", "grasp_dz": 0.005, "grasp_off": (0.0, 0.0)},
     "box": {"rest_half_z": BOX_HALF[2], "grasp": "top", "grasp_dz": 0.0, "grasp_off": (0.0, 0.0)},
-    "cup": {"rest_half_z": CUP_HALF_H, "grasp": "rim", "grasp_dz": 0.015,
+    "cup": {"rest_half_z": CUP_HALF_H, "grasp": "rim", "grasp_dz": 0.022,
             "grasp_off": (0.0, CUP_OUTER_R - CUP_WALL_T / 2.0)},
 }
 

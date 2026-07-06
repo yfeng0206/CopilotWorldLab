@@ -176,6 +176,36 @@ class FrankaDroidEnv:
         for _ in range(int(settle)):
             self._mujoco.mj_step(self.model, self.data)
 
+    def move_held_to(self, pos=None, euler=None, gripper=None, upright: bool = False) -> None:
+        """Kinematically carry the currently-held object to a new EE pose, keeping the object's pose
+        *relative to the gripper* fixed (so a held object stays in its grasp orientation). Leaves the
+        state set (mj_forward, no stepping) -- used to build held sub-goal images without the
+        tilt/swing a physical one-wall-rim transport would introduce. No-op if no object.
+
+        ``upright=True`` forces the object to stand vertically (its grasp-time gripper may be a few
+        degrees off straight-down due to IK limits; a held goal image should show the object upright)."""
+        if self._cube_qadr < 0:
+            self.set_ee_pose(pos=pos, euler=euler, gripper=gripper)
+            return
+        ee0_pos, ee0_quat = self._ee_pos_quat()
+        obj0 = self.object_pose()
+        rel_pos = geo.quat_to_mat(ee0_quat).T @ (obj0[:3] - ee0_pos)
+        ee0_conj = np.array([ee0_quat[0], -ee0_quat[1], -ee0_quat[2], -ee0_quat[3]])
+        rel_quat = geo.quat_mul(ee0_conj, obj0[3:])
+        self.set_ee_pose(pos=pos, euler=euler, gripper=gripper)
+        ee1_pos, ee1_quat = self._ee_pos_quat()
+        obj_pos = ee1_pos + geo.quat_to_mat(ee1_quat) @ rel_pos
+        if upright:
+            m = geo.quat_to_mat(geo.quat_normalize(geo.quat_mul(ee1_quat, rel_quat)))
+            yaw = float(np.arctan2(m[1, 0], m[0, 0]))       # keep heading, drop pitch/roll
+            obj_quat = geo.euler_xyz_to_quat(0.0, 0.0, yaw)
+        else:
+            obj_quat = geo.quat_normalize(geo.quat_mul(ee1_quat, rel_quat))
+        self.data.qpos[self._cube_qadr:self._cube_qadr + 3] = obj_pos
+        self.data.qpos[self._cube_qadr + 3:self._cube_qadr + 7] = obj_quat
+        self.data.qvel[:] = 0.0
+        self._mujoco.mj_forward(self.model, self.data)
+
     # ------------------------------------------------------- privileged object truth
     def object_pose(self) -> np.ndarray:
         """Cube pose [x, y, z, qw, qx, qy, qz] (world). NaN if no object in the scene."""
