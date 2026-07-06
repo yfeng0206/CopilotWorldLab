@@ -81,10 +81,14 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 - [x] Closed-loop task-success benchmark runner (Reach/Grasp/Place/Pick-Place) with
       multi-threshold precision curves, paper-faithful pick_place (4/10/4), CEM chunking, and a
       GT-vs-V-JEPA side-by-side demo.
-- [ ] **Fixed-bundle rebuild:** cup + box objects (+ distractors) in `franka_build.py`;
-      `reach_with_object` task; `generate_task_bundles.py` scripted-expert bundle generator;
-      `--bundles` loader in the runner; 50 trials per (task, object) over
-      reach/grasp/reach_with_object/pick_place x cup/box (400 bundles).
+- [x] **Fixed-bundle rebuild (objects + generator):** cup + box objects (+ distractors) in
+      `franka_build.py` (cup = procedural rim-graspable open cylinder; verified rim grasp with one
+      finger inside); `reach_with_object` task; `scripts/generate_task_bundles.py` scripted-expert
+      generator with randomized start poses + paper-like moves; **400 bundles** generated under
+      `tasks/` (reach/grasp/reach_with_object/pick_place x cup/box x 50, 0 skipped).
+- [ ] **`--bundles` loader:** make `run_closed_loop_benchmark.py` LOAD the fixed bundles (restore
+      qpos0, use saved goal images, handle `start_grasped`) instead of `_rand_cube_xy`; add tests;
+      then run at samples 200/400/800.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 
