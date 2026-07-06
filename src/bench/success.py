@@ -96,3 +96,33 @@ def place_success(obj_xy, zone_xy, tilt_rad: float, speed: float, released: bool
             ft = "unstable"
     return SuccessResult(ok, ft, {"zone_dist": dist, "tilt_deg": float(np.degrees(tilt_rad)),
                                   "speed": float(speed), "released": bool(released)})
+
+
+# --- fixed-bundle task classifier (grasp / reach_with_object / grasp_and_reach / pick_place) -------
+# Ordered (gate -> failure reason) per task: the FIRST failed gate names the failure. If every gate
+# holds but the object is outside the loosest precision sphere, it is a pure distance miss.
+_BUNDLE_FAILURE_ORDER = {
+    "grasp": [("held", "missed"), ("lifted", "not_lifted"),
+              ("upright", "tipped"), ("stable", "unstable")],
+    "reach_with_object": [("held", "dropped"), ("upright", "tipped")],
+    "grasp_and_reach": [("held", "dropped"), ("upright", "tipped")],
+    "pick_place": [("grasped", "grasp_failed"), ("released", "not_released"),
+                   ("upright", "tipped"), ("stable", "unstable")],
+}
+_BUNDLE_OFF_GOAL = {"pick_place": "outside_zone"}  # default: "off_goal"
+
+
+def bundle_classify(task: str, error: float, gates: dict, thresholds) -> tuple[bool, str]:
+    """Final verdict for a fixed-bundle trial: success requires the object within the LOOSEST
+    precision sphere (``max(thresholds)``) AND every physical gate. This keeps the per-step
+    ``success`` flag, the ``failure`` label, and the precision-curve ``success@x`` mutually
+    consistent (all error-aware) rather than gates-only. Returns ``(success, failure)`` with
+    ``failure=""`` on success.
+    """
+    ok = bool(error < max(thresholds) and all(gates.values()))
+    if ok:
+        return True, ""
+    for gate, reason in _BUNDLE_FAILURE_ORDER.get(task, []):
+        if not gates.get(gate, True):
+            return False, reason
+    return False, _BUNDLE_OFF_GOAL.get(task, "off_goal")

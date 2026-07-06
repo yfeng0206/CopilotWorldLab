@@ -1,4 +1,4 @@
-"""Closed-loop V-JEPA 2-AC benchmark runner: Reach / Grasp-Lift / Place.
+"""Closed-loop V-JEPA 2-AC benchmark runner (fixed-bundle + legacy modes).
 
 The Phase-1 task-success benchmark (docs/experiments/closed_loop_benchmark.md). Runs at any scale:
 1-5 trials for a smoke check, 50 trials for the full precision-curve benchmark.
@@ -7,25 +7,27 @@ and a goal image; V-JEPA 2-AC plans the coarse motion with CEM MPC. Scripted pri
 gripper (close/lift/open). Success is judged ONLY from hidden privileged MuJoCo truth
 (src/bench/success.py) -- object pose, contacts, velocity, tilt -- never from the latent energy.
 
+Two modes:
+  --bundles <dir>  FIXED-BUNDLE mode (primary): load the saved, inspectable task bundles from
+                   <dir>/<task>/<object>/ (see scripts/generate_task_bundles.py) and score every
+                   config on identical scenarios. Tasks: grasp / reach_with_object / grasp_and_reach
+                   / pick_place, each per object (cup / box). Each trial restores the exact recorded
+                   start (env.set_state(qpos0) + mocap zone, honoring start_grasped), plans to the
+                   SAVED goal/sub-goal images (pick_place on the paper 4/10/4 schedule), scripts only
+                   the gripper, and scores from hidden state with the swept sphere x.
+  (legacy)         random-per-trial reach / grasp_lift / place / pick_place (stably seeded; see
+                   TASK_SEED_OFFSET). Used before the fixed bundles existed.
+
 CEM config (defaults follow Meta's released wrapper; smaller population for the 3090):
     samples=200, cem_steps=10, rollout/horizon T=2, topk=10, maxnorm=0.05 m/axis, momentum 0.15.
-Later ablations (not here): T=1 vs T=2, samples 200/400/800, maxnorm 0.05 vs 0.075.
-
-Task decomposition (honest separation of V-JEPA vs scripted; success from hidden MuJoCo truth):
-  reach       : pure V-JEPA closed-loop to a goal image.
-  grasp_lift  : V-JEPA REACHES the grasp pose (goal image = arm at the cube); only close + lift
-                are scripted -- no privileged re-centering, so the rate reflects V-JEPA's grasp.
-  place       : scripted grasp to start holding (isolates placement), then V-JEPA DRIVES the held
-                cube over the zone; the release lowers straight down at V-JEPA's reached xy (no
-                move-to-zone-center), so the rate reflects V-JEPA's placement accuracy.
 
 One continuous error per trial -> success@multiple precision thresholds computed from a single run.
 Full run-log (config + per-step CSV + per-trial CSV + selected viz) lands under
 logs/closed_loop_runs/<run_id>/; the committed report (summary.md/csv, plots, selected GIFs +
 contact sheets for ~3 best/median/worst trials) lands under results/benchmarks/closed_loop_<tag>/.
-Cube/target positions are randomized per trial (stably seeded; see TASK_SEED_OFFSET).
 
-    python scripts/run_closed_loop_benchmark.py --tasks reach grasp_lift place --trials 50
+    python scripts/run_closed_loop_benchmark.py --bundles tasks \\
+        --tasks grasp reach_with_object grasp_and_reach pick_place --objects cup box --trials 50
 """
 from __future__ import annotations
 
@@ -38,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Optional
@@ -66,11 +69,19 @@ from src.envs.franka_build import (  # noqa: E402
 from src.envs.franka_droid_env import FrankaDroidEnv  # noqa: E402
 from src.bench.schema import SUCCESS_DEFAULTS, TaskBundle  # noqa: E402
 from src.bench.success import (  # noqa: E402
+    bundle_classify,
     grasp_lift_success,
     place_success,
     reach_success,
 )
-from src.bench.thresholds import GATE_SPEC, THRESHOLDS, success_at  # noqa: E402
+from src.bench.thresholds import (  # noqa: E402
+    BUNDLE_TASKS,
+    GATE_SPEC,
+    LEGACY_TASKS,
+    THRESHOLDS,
+    success_at,
+    validate_task_mode,
+)
 
 clog = _load_by_path("cwlab_logging", os.path.join(_REPO_ROOT, "src", "utils", "logging.py"))
 
@@ -304,7 +315,8 @@ class TrialLogger:
         obj_dz = tilt = speed = float("nan")
         held = released = ""
         if self.has_object:
-            obj_dz = float(obj[2] - (TABLE_TOP_Z + CUBE_HALF))
+            rest_half = float(getattr(env, "object_rest_half_z", CUBE_HALF))
+            obj_dz = float(obj[2] - (TABLE_TOP_Z + rest_half))
             tilt, speed = float(np.degrees(s["tilt"])), float(s["speed"])
             held, released = int(s["held"]), int(s["released"])
         a = action if action is not None else [np.nan] * 7
@@ -858,8 +870,9 @@ def task_pick_place(env, ctx, tlog, args):
 TASKS = {"reach": task_reach, "grasp_lift": task_grasp_lift, "place": task_place,
          "pick_place": task_pick_place}
 
-# Fixed-bundle task set (loaded from tasks/<task>/<object>/; see scripts/generate_task_bundles.py).
-BUNDLE_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
+# BUNDLE_TASKS + validate_task_mode are imported from src.bench.thresholds (pure + unit-tested);
+# LEGACY_TASKS mirrors this scripted-function registry (guard against drift).
+assert set(TASKS) == set(LEGACY_TASKS)
 
 
 def _fixed_goal(img, target):
@@ -905,7 +918,6 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         gates = {"lifted": float(obj[2] - obj_z0) > 0.04, "held": bool(env.gripper_holds_object()),
                  "upright": float(np.degrees(env.object_tilt())) < 30.0,
                  "stable": float(env.object_speed()) < 0.05}
-        failure = "" if all(gates.values()) else ("missed" if not gates["held"] else "unstable")
         target = arr["grasp_pos"]
 
     elif task in ("reach_with_object", "grasp_and_reach"):
@@ -921,7 +933,6 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         error = float(np.linalg.norm(obj - goal_obj))
         held = bool(env.gripper_holds_object())
         gates = {"held": held, "upright": float(np.degrees(env.object_tilt())) < 30.0}
-        failure = "" if all(gates.values()) else ("dropped" if not held else "tipped")
         target = arr["goal_ee"]
 
     else:  # pick_place -- 3 sub-goals on the fixed 4 / 10 / 4 schedule
@@ -939,14 +950,12 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         obj = env.object_position()
         error = float(np.linalg.norm(obj[:2] - env.zone_center()))
         gates = {"grasped": grasped, "upright": float(np.degrees(env.object_tilt())) < 25.0,
-                 "stable": float(env.object_speed()) < 0.05, "released": bool(env.object_released())}
-        failure = ("grasp_failed" if not grasped
-                   else "" if all(gates.values())
-                   else "outside_zone" if error >= max(THRESHOLDS["pick_place"]) else "unstable")
+                 "stable": float(env.object_speed()) < 0.05, "released": bool(env.object_placed())}
         target = arr["place_pos"]
 
+    success, failure = bundle_classify(task, error, gates, THRESHOLDS[task])
     tlog.record(env, "final", None, None, float("nan"), target, float("nan"), error,
-                success=int(all(gates.values())), failure=failure)
+                success=int(success), failure=failure)
     return {"error": error, "gates": gates, "failure": failure, "metrics": {}}
 
 
@@ -1072,7 +1081,11 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
 
     bundles_root = (args.bundles if os.path.isabs(args.bundles)
                     else os.path.join(_REPO_ROOT, args.bundles))
+    if not os.path.isdir(bundles_root):
+        raise SystemExit(f"--bundles dir not found: {bundles_root} (generate with "
+                         f"scripts/generate_task_bundles.py, or pass the correct path)")
     summaries, all_records = [], {}
+    total_loaded = 0
     for task in args.tasks:
         for obj in args.objects:
             obj_dir = os.path.join(bundles_root, task, obj)
@@ -1080,7 +1093,15 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
                 logger.warning("no bundles for %s/%s under %s -- skipping", task, obj, bundles_root)
                 continue
             ids = sorted(d for d in os.listdir(obj_dir)
-                         if os.path.isdir(os.path.join(obj_dir, d)))[: args.trials]
+                         if os.path.isdir(os.path.join(obj_dir, d)))
+            if not ids:
+                logger.warning("%s/%s has 0 bundles -- skipping", task, obj)
+                continue
+            if len(ids) < args.trials:
+                logger.warning("%s/%s has only %d bundles < requested --trials %d; running all %d",
+                               task, obj, len(ids), args.trials, len(ids))
+            ids = ids[: args.trials]
+            total_loaded += len(ids)
             env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
                                  add_object=True, add_zone=True, object_type=obj, add_distractors=True)
             fovy = float(env.model.vis.global_.fovy)
@@ -1088,10 +1109,11 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
                    "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                                   dev=dev, autocast_dtype=autocast_dtype)}
             label = f"{task}/{obj}"
+            pair_off = zlib.crc32(label.encode()) & 0xFFFF  # per-(task,object) seed offset
             records, tlogs = [], []
             for ti, bid in enumerate(ids):
                 bundle = TaskBundle.load(os.path.join(obj_dir, bid))
-                torch.manual_seed(args.seed * 100003 + ti)  # CEM sampling (bf16 GPU is still noisy)
+                torch.manual_seed(args.seed * 100003 + pair_off * 997 + ti)  # CEM sampling (bf16 noisy)
                 tlog = TrialLogger(csv, label, ti, fovy, True)
                 t0 = time.perf_counter()
                 rec = run_bundle_trial(env, ctx, tlog, args, bundle)
@@ -1107,7 +1129,7 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
                            thr_flags=thr_flags, all_success=any(thr_flags.values()))
                 records.append(rec)
                 tlogs.append(tlog)
-                trial_csv.log(label, ti, round(rec["error"], 4), int(rec["all_success"]),
+                trial_csv.log(label, ti, bid, round(rec["error"], 4), int(rec["all_success"]),
                               rec["failure"], _r(rec["final_energy"]), rec["vjepa_steps"],
                               rec["total_steps"], _r(rec["mean_cem_s"]), rec["wall_s"],
                               json.dumps({str(k): int(v) for k, v in thr_flags.items()}))
@@ -1118,15 +1140,23 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
 
             for i in select_for_viz(records):
                 frames = tlogs[i].build_frames()
-                imageio.mimsave(os.path.join(viz_dir, f"{task}_{obj}_t{i}.gif"), frames, fps=2, loop=0)
-                save_contact_sheet(frames, os.path.join(viz_dir, f"{task}_{obj}_t{i}_contact.png"),
+                gif_name = f"{task}_{obj}_t{i}.gif"
+                contact_name = f"{task}_{obj}_t{i}_contact.png"
+                imageio.mimsave(os.path.join(viz_dir, gif_name), frames, fps=2, loop=0)
+                save_contact_sheet(frames, os.path.join(viz_dir, contact_name),
                                    phases=tlogs[i].phases)
+                for name in (gif_name, contact_name):  # copy selected viz into the committed report
+                    shutil.copy(os.path.join(viz_dir, name), os.path.join(report_dir, name))
             write_task_plots(records, task, os.path.join(report_dir, f"{task}_{obj}_summary.png"))
             s = summarize_task(records, task)
             s["label"] = label
             summaries.append(s)
             all_records[label] = records
 
+    if not summaries:
+        raise SystemExit(f"no bundles matched tasks={args.tasks} objects={args.objects} under "
+                         f"{bundles_root}; nothing to run (check the path, task/object names).")
+    logger.info("loaded %d bundles across %d (task, object) pairs", total_loaded, len(summaries))
     _write_bundle_summary(report_dir, run_id, config, summaries, args, bundles_root)
     logger.info("-" * 64)
     logger.info("FIXED-BUNDLE PRECISION SUMMARY (samples=%d T=%d cem_steps=%d maxnorm=%.3f)",
@@ -1236,8 +1266,9 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=0, help="seed for per-trial randomized init")
     p.add_argument("--tag", default="full", help="report subdir: results/benchmarks/closed_loop_<tag>")
     p.add_argument("--demo", choices=["reach", "grasp_lift", "place", "pick_place"], default=None,
-                   help="build a side-by-side ground-truth vs V-JEPA comparison GIF for the given "
-                        "task (reuses the loaded model) and exit, instead of running the benchmark")
+                   help="LEGACY (random-task) demo: build a side-by-side ground-truth vs V-JEPA "
+                        "comparison GIF for the given legacy task and exit. Does NOT use the fixed "
+                        "bundles; the fixed-bundle tasks are not available here.")
     p.add_argument("--viz-only-selected", action="store_true", default=True,
                    help="save GIFs only for ~3 best/median/worst trials (default on)")
     args = p.parse_args()
@@ -1245,6 +1276,13 @@ def main() -> None:
     # In --bundles mode, default to the fixed-bundle task set unless the user asked for specific tasks.
     if args.bundles and args.tasks == ["reach", "grasp_lift", "place"]:
         args.tasks = list(BUNDLE_TASKS)
+
+    # Guard task/mode combinations: fixed-bundle-only tasks (grasp / reach_with_object /
+    # grasp_and_reach) need saved bundles; the legacy random tasks (reach / grasp_lift / place) have
+    # no bundles. ``pick_place`` exists in BOTH registries and is allowed either way.
+    _mode_err = validate_task_mode(args.tasks, args.bundles)
+    if _mode_err:
+        raise SystemExit(_mode_err)
 
     # Stop-guard: if this flag file exists, exit immediately (before loading the model). Lets a
     # detached multi-run launcher be halted cleanly -- already-running invocations finish from their
@@ -1297,7 +1335,7 @@ def main() -> None:
         "pos_tol": args.pos_tol,
         "max_vjepa_steps": {"reach": args.reach_steps, "pregrasp": args.pregrasp_steps,
                             "grasp": args.grasp_steps, "place_vicinity": args.vicinity_steps,
-                            "place": args.place_steps,
+                            "place": args.place_steps, "reach_with_object": args.rwo_steps,
                             "pnp_4_10_4": [args.pnp_grasp_steps, args.pnp_vicinity_steps,
                                            args.pnp_place_steps]},
         "thresholds_m": THRESHOLDS, "gate_spec": GATE_SPEC,
@@ -1310,6 +1348,24 @@ def main() -> None:
                  "steps_csv": "steps.csv", "trials_csv": "trials.csv",
                  "report_dir": os.path.relpath(report_dir, _REPO_ROOT)},
     }
+    if args.bundles:
+        # Fixed-bundle mode: the start pose, object type, and zone come from the saved bundle, so the
+        # cube-specific/random-start fields above do NOT describe this run. Record the true provenance.
+        config["mode"] = "fixed_bundles"
+        config["bundles"] = {
+            "dir": args.bundles, "objects": list(args.objects), "tasks": list(args.tasks),
+            "trials_per_task_object": args.trials, "rwo_steps": args.rwo_steps,
+            "object_rest_half_z_m": {o: OBJECT_SPECS[o]["rest_half_z"] for o in args.objects},
+        }
+        config["env"] = {
+            "embodiment": "Franka Panda + Robotiq 2F-85 (FrankaDroidEnv)",
+            "camera": "PLANNING_CAMERA (az45_el45 free cam)", "crop": CROP,
+            "objects": list(args.objects), "add_distractors": True,
+            "start": "restored from saved bundle qpos0 (fixed, not randomized)",
+            "place_zone": "restored per bundle (mocap place zone)",
+        }
+    else:
+        config["mode"] = "random_per_trial"
     with open(os.path.join(run_dir, "run_config.json"), "w") as f:
         json.dump(config, f, indent=2)
 
@@ -1355,7 +1411,7 @@ def main() -> None:
 
     trial_csv = clog.CSVLogger(
         os.path.join(run_dir, "trials.csv"),
-        "task", "trial", "error_m", "success_loose", "failure", "final_energy",
+        "task", "trial", "bundle_id", "error_m", "success_loose", "failure", "final_energy",
         "vjepa_steps", "total_steps", "mean_cem_s", "wall_s", "success_at_thresholds",
     )
 
@@ -1396,7 +1452,7 @@ def main() -> None:
                        all_success=any(thr_flags.values()))  # success at the LOOSEST threshold
             records.append(rec)
             tlogs.append(tlog)
-            trial_csv.log(task, trial, round(rec["error"], 4), int(rec["all_success"]),
+            trial_csv.log(task, trial, "", round(rec["error"], 4), int(rec["all_success"]),
                           rec["failure"], _r(rec["final_energy"]), rec["vjepa_steps"],
                           rec["total_steps"], _r(rec["mean_cem_s"]), rec["wall_s"],
                           json.dumps({str(k): int(v) for k, v in thr_flags.items()}))

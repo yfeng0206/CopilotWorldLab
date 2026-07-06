@@ -39,6 +39,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from src.bench.schema import TaskBundle  # noqa: E402
+from src.bench.thresholds import THRESHOLDS  # noqa: E402
 from src.envs.franka_build import (  # noqa: E402
     OBJECT_SPECS,
     PLANNING_CAMERA,
@@ -53,13 +54,10 @@ EE_DOWN = [np.pi, 0.0, 0.0]  # gripper pointing down (extrinsic XYZ euler), matc
 ALL_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
 ALL_OBJECTS = ["cup", "box"]
 
-# Precision sphere-radius sweep per task (metres); success@x = delta < x AND physical gates.
-X_SWEEP = {
-    "grasp": [0.06, 0.03, 0.02],
-    "reach_with_object": [0.06, 0.03, 0.015],
-    "grasp_and_reach": [0.06, 0.03, 0.015],
-    "pick_place": [0.10, 0.06, 0.03, 0.015],
-}
+# Precision sphere-radius sweep per task (metres). SINGLE SOURCE OF TRUTH is
+# ``src.bench.thresholds.THRESHOLDS`` -- the benchmark scores success@x at exactly these radii, so
+# meta.json advertises the same sweep it is scored against. success@x = delta < x AND physical gates.
+X_SWEEP = {t: list(THRESHOLDS[t]) for t in ALL_TASKS}
 
 
 def _goto(env, pos, grip=None, n=10, step=0.05):

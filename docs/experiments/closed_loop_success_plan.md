@@ -197,7 +197,7 @@ the goal:
 ```
 delta     = ||obj_p_final - goal_object||
 success@x = delta < x AND held AND upright
-x in {0.06, 0.03, 0.015} m
+x in {0.10, 0.06, 0.03, 0.015} m
 ```
 
 **grasp_and_reach** — object starts on the table; V-JEPA reaches `goal_1` (just grabbed), then moves
@@ -205,17 +205,21 @@ the held object to `goal`:
 ```
 delta     = ||obj_p_final - goal_object||
 success@x = delta < x AND held AND upright
-x in {0.06, 0.03, 0.015} m
+x in {0.10, 0.06, 0.03, 0.015} m
 ```
 
 **pick_place** — V-JEPA follows `goal_1` just-grabbed, `goal_2` vicinity, and final placed goal on the
 fixed 4/10/4 schedule; the gripper opens after the final goal:
 ```
 delta     = ||obj_p_final - zone_center||
-success@x = delta < x AND released AND upright AND stable
+success@x = delta < x AND grasped AND released AND upright AND stable
 x in {0.10, 0.06, 0.03, 0.015} m
 ```
-Failure typing: `grasp_failed`, `outside_zone`, `tipped`, `unstable`, `still_attached`.
+`released` is evaluated as `object_placed` (gripper open AND object resting at table height AND
+settled), not strict "not touching", so a correctly-placed rim cup with a grazing inner finger is not
+spuriously failed. All radii above come from `src/bench/thresholds.py::THRESHOLDS` (single source of
+truth; the generator imports it). Failure typing: `grasp_failed`, `not_released`, `tipped`,
+`unstable`, `outside_zone`.
 
 Every trial also records continuous quantities (distance, tilt, velocity, obj_dz) so ROC/gate
 analysis (Stage 4) is possible.

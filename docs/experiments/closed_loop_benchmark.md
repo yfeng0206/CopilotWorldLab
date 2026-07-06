@@ -75,8 +75,7 @@ start.png         t0 observation (planner input; for reach_with_object the objec
 goal.png          final goal image (grasp = just grabbed; reach_with_object/grasp_and_reach = held-object target; pick_place = placed)
 goal_1.png        grasp_and_reach and pick_place sub-goal 1 (object just grabbed, not lifted)
 goal_2.png        pick_place sub-goal 2 (object held in the vicinity of the zone)
-arrays.npz        qpos0, object_pose, goal_object_pose, target/zone pose, ee states, camera
-model.xml         exact patched MJCF for this scenario
+arrays.npz        qpos0, object_pose, goal_object, target/zone pose, ee states, camera
 contact_sheet.png start | sub-goals | goal strip for human inspection
 ```
 
@@ -146,18 +145,27 @@ success@x across `x` from tight to loose, per (task, object):
   `lifted` (object Δz > 4 cm) AND `upright` (<30°) AND `stable` (<5 cm/s). x ∈ {6, 3, 2} cm.
 - **reach_with_object**: object starts already grasped in the bundle. delta =
   `‖object_final − goal_object‖`. `success@x = delta < x` AND `held` (never dropped) AND `upright`
-  (<30°). x ∈ {6, 3, 1.5} cm.
+  (<30°). x ∈ {10, 6, 3, 1.5} cm.
 - **grasp_and_reach**: object starts on the table; V-JEPA first reaches the just-grabbed `goal_1`, then
   moves the held object to the final target. delta = `‖object_final − goal_object‖`. `success@x =
-  delta < x` AND `held` (never dropped after the grasp) AND `upright` (<30°). x ∈ {6, 3, 1.5} cm.
+  delta < x` AND `held` (never dropped after the grasp) AND `upright` (<30°). x ∈ {10, 6, 3, 1.5} cm.
 - **pick_place**: V-JEPA does grasp → vicinity → place on the fixed 4/10/4 schedule. delta =
-  `‖object_final − zone_center‖`. `success@x = delta < x` AND `released` (gripper open, not touching)
-  AND `upright` (<25°) AND `stable`. x ∈ {10, 6, 3, 1.5} cm.
+  `‖object_final − zone_center‖`. `success@x = delta < x` AND `grasped` (was actually picked up) AND
+  `released` AND `upright` (<25°) AND `stable`. Here `released` uses `object_placed` — gripper open
+  AND the object resting at table height AND settled — rather than the strict "not touching" test, so
+  a correctly-placed rim cup whose inner finger still grazes the wall is not spuriously failed
+  (success = where the object landed + the arm let go, per the paper's intent). x ∈ {10, 6, 3, 1.5} cm.
+
+The single source of truth for these radii is `src/bench/thresholds.py::THRESHOLDS`; the generator
+imports it, so every bundle's `meta.json` advertises exactly the radii the benchmark scores against.
+The final per-trial `success`/`failure` are error-aware: a trial only counts as success when the
+object is within the loosest sphere AND every gate holds, and a gates-pass-but-off-target trial is
+labelled `off_goal` (`outside_zone` for pick_place) rather than a blank success.
 
 Sweeping `x` low→high yields the precision curve; the mean delta and success@x together show how tight
-a tolerance V-JEPA can meet. Failure types are recorded categorically (grasp: missed / pushed /
-slipped / tipped / dropped; reach_with_object and grasp_and_reach: dropped / tipped / off_goal;
-pick_place: grasp_failed / outside_zone / tipped / unstable / still_attached).
+a tolerance V-JEPA can meet. Failure types are recorded categorically (grasp: missed / not_lifted /
+tipped / unstable / off_goal; reach_with_object and grasp_and_reach: dropped / tipped / off_goal;
+pick_place: grasp_failed / not_released / tipped / unstable / outside_zone).
 
 ## Environment and data
 
@@ -222,8 +230,10 @@ python scripts/run_closed_loop_benchmark.py --bundles tasks --tasks pick_place -
 ## Demo: ground truth vs V-JEPA
 
 `--demo <task>` builds a side-by-side GIF: the **optimal scripted expert (GROUND TRUTH)** and
-**V-JEPA (ours)** driving to the *same* saved scenario under the same per-step action clip, played in
-sync with a live distance readout. It shows how V-JEPA's planned path compares to the ideal.
+**V-JEPA (ours)** driving to the *same* random scenario under the same per-step action clip, played in
+sync with a live distance readout. It shows how V-JEPA's planned path compares to the ideal. NOTE:
+`--demo` is **legacy only** (the random-scenario reach / grasp_lift / place / pick_place tasks); it
+does not load the fixed bundles and the fixed-bundle tasks are not available through it.
 
 ## Logging and outputs
 

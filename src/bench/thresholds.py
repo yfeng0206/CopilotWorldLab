@@ -38,3 +38,30 @@ GATE_SPEC = {
 def success_at(error: float, gates: dict, thr: float) -> bool:
     """A trial is a success at precision ``thr`` iff error < thr AND all physical gates hold."""
     return bool(error < thr and all(gates.values()))
+
+
+# Canonical task-name registries (names only; the runner binds LEGACY_TASKS to scripted functions).
+# ``pick_place`` deliberately appears in BOTH: it has a legacy random-scenario implementation and a
+# fixed-bundle implementation.
+LEGACY_TASKS = ["reach", "grasp_lift", "place", "pick_place"]
+BUNDLE_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
+
+
+def validate_task_mode(tasks, bundles, legacy=LEGACY_TASKS, bundle_tasks=BUNDLE_TASKS):
+    """Return an error message if the (``tasks``, ``--bundles``) combination is invalid, else None.
+
+    Fixed-bundle-only tasks (grasp / reach_with_object / grasp_and_reach) require ``--bundles``;
+    legacy random tasks (reach / grasp_lift / place) cannot run under ``--bundles``. ``pick_place``
+    is valid in either mode. Pure, so it is unit-testable without argparse or the model."""
+    bundle_only = [t for t in bundle_tasks if t not in legacy]
+    if bundles:
+        stray = [t for t in tasks if t not in bundle_tasks]
+        if stray:
+            return (f"--bundles supports only {list(bundle_tasks)}; got unsupported {stray}. "
+                    f"Drop them or run without --bundles for the legacy tasks {list(legacy)}.")
+    else:
+        need = [t for t in tasks if t in bundle_only]
+        if need:
+            return (f"tasks {need} are fixed-bundle only and require --bundles <dir> "
+                    f"(e.g. --bundles tasks). Legacy tasks are {list(legacy)}.")
+    return None

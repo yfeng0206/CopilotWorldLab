@@ -3,11 +3,11 @@
 Opens a live MuJoCo window for one object (cup or box). All four tasks (grasp, reach_with_object,
 grasp_and_reach, pick_place) share the same scene for a given object, so this cycles through every
 task's stages (start -> sub-goals -> goal) in one window. Orbit/zoom freely with the mouse; press
-SPACE to advance to the next stage, BACKSPACE to go back. The stage is frozen (physics not stepped),
-so you see exactly the saved state.
+N (or right arrow) to advance to the next stage, B (or left arrow) to go back (SPACE is reserved by
+the viewer for pause). The stage is frozen (physics not stepped), so you see exactly the saved state.
 
-    python scripts/inspect_task_viewer.py --object cup --tasks-dir tasks_verify
-    python scripts/inspect_task_viewer.py --object box --tasks-dir tasks_verify
+    python scripts/inspect_task_viewer.py --object cup
+    python scripts/inspect_task_viewer.py --object box --tasks-dir tasks
 
 Requires per-stage qpos in the bundles (arrays.npz: qpos_start / qpos_goal_1 / qpos_goal_2 /
 qpos_goal), written by scripts/generate_task_bundles.py.
@@ -57,7 +57,8 @@ def main():
     p.add_argument("--object", choices=["cup", "box"], default="cup")
     p.add_argument("--tasks", nargs="+", default=TASK_ORDER, choices=TASK_ORDER,
                    help="restrict to these tasks (default: all four)")
-    p.add_argument("--tasks-dir", default=os.path.join(_REPO_ROOT, "tasks_verify"))
+    p.add_argument("--tasks-dir", default=os.path.join(_REPO_ROOT, "tasks"),
+                   help="bundle root written by scripts/generate_task_bundles.py (default: tasks)")
     args = p.parse_args()
 
     import mujoco

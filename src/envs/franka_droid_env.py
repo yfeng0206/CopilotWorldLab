@@ -287,6 +287,22 @@ class FrankaDroidEnv:
         """
         return self.gripper_is_open(open_thresh) and not self.gripper_holds_object()
 
+    def object_placed(self, open_thresh: float = 0.15, z_tol: float = 0.02,
+                      v_settle: float = 0.05) -> bool:
+        """Placement-fair alternative to ``object_released`` for the rim-grasped cup: True if the
+        gripper is open AND the object is resting at table height (settled). The cup's inner finger
+        can graze the wall after a correct place and spuriously fail the strict ``not touching``
+        test; a place is valid once the arm is open and the object stands on its own at its rest
+        height, regardless of an incidental grazing contact. No-op (False) if there is no object."""
+        if self._cube_bid < 0:
+            return False
+        if not self.gripper_is_open(open_thresh):
+            return False
+        rest_z = TABLE_TOP_Z + self.object_rest_half_z
+        resting = abs(float(self.object_position()[2]) - rest_z) < z_tol
+        settled = self.object_speed() < v_settle
+        return bool(resting and settled)
+
     def _is_gripper_body(self, bid: int) -> bool:
         name = self._mujoco.mj_id2name(self.model, self._mujoco.mjtObj.mjOBJ_BODY, int(bid)) or ""
         return "2f85_" in name and ("pad" in name or "finger" in name or "follower" in name)

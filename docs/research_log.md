@@ -13,6 +13,23 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-06 -- Two-round audit + fixes of the fixed-bundle loader
+
+#### 20. Prioritized audit (P0/P1/P2/P3) and fixes, no P0 found
+**Context**: after the `--bundles` loader landed, ran two audit rounds (mine + a GPT-5.5 pass) before
+committing to a full run.
+**Findings/fixes**: no correctness-breaking P0. P1 code fixes: (a) CLI guard for task/mode combos;
+(b) error-aware `bundle_classify` so steps.csv `success`, `failure`, and `success@x` agree;
+(c) THRESHOLDS as the single source of truth for the precision sweep (generator + patched meta);
+(d) placement-fair `object_placed` for the rim cup; (e) fail-loud on missing/undercount bundles.
+P2: bundle-accurate `run_config.json` (mode + bundles block), `bundle_id` in trials.csv, report GIFs,
+doc/schema/viewer sync, and `tests/test_bundle_bench.py`. Suite 49 passed.
+**Empirical check**: the suspected held-cup grip-instability was NOT reproduced -- a 30-step
+multi-axis transport at the per-axis clip keeps both objects gripped (max tilt cup 15.6 / box 17.7
+deg, < 30 deg gate), so no physics change was made (avoids regressing the approved bundles).
+**Outcome**: fixes committed to main; running the full 4-task x cup/box x 50 benchmark at samples=200
+then 400 to produce the first fixed-bundle precision curves.
+
 ### 2026-07-06 -- Fixed-bundle benchmark loader (`--bundles`)
 
 #### 19. Run the closed-loop benchmark on the fixed saved bundles instead of randomizing
