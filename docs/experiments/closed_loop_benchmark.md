@@ -196,6 +196,27 @@ scoring** -- we require object-center within a geometric zone AND physical gates
 completion. Pick-place is therefore the vanilla baseline the W* calibration + predictor fine-tuning
 (Phases 2-4) must close, measured on this exact protocol.
 
+#### Why the paper's Pick-Place (80%) beats its own Grasp (60%) -- for the same Cup
+
+A natural paradox: pick-and-place *requires* a grasp, so how can it exceed the standalone grasp
+rate? Verified from the PDF (arXiv 2506.09985 App. B, Fig. 14): the paper reports **human-judged**
+success over only **10 trials** with **no numeric threshold**. The intuitive reconciliation:
+
+- **Standalone Grasp is a stricter one-shot test** -- a single goal image of the object
+  grasped-and-lifted; one imperfect attempt fails the trial.
+- **The grasp inside Pick-and-Place only has to be "good enough."** PnP shows 3 goal images
+  (grasp -> vicinity -> place) over 18 closed-loop steps; success is only that the object ends in
+  the target. A functional-but-imperfect grip that would fail the strict standalone grasp still
+  carries the object to the zone; the extra sub-goals act as a guide-rail and re-planning each step
+  adds error-correction the short grasp task lacks.
+- **n=10 noise**: 60->80% is a 2-trial difference.
+
+So it is not that "placing is easier than grasping" -- the standalone Grasp is simply *measured*
+more strictly than the grasp embedded in Pick-and-Place. Our benchmark scores the pick_place grasp
+**strictly** (`grasp_failed` if not firmly held after the 4 fixed steps), i.e. closer to the paper's
+hard standalone-grasp bar than its lenient PnP bar -- one reason our 6% looks low.
+
+
 #### Where pick-place actually fails (traced over all 50 trials @200)
 
 We use the **same 3 sub-goals on the same 4/10/4 schedule as the paper** -- the gap is *not* a
