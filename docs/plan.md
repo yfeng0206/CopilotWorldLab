@@ -36,20 +36,23 @@ Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows
 benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
 1. **Fixed-bundle closed-loop benchmark (Phase 1, in build).** Replace the random-per-trial scenarios
-   with **fixed, saved task bundles** and run the paper's **four robot tasks** — **Reach / Grasp /
-   Reach-with-object / Pick-Place** — on **two objects** (a rim-graspable **cup** and a rigid
-   **box**), **50 trials per (task, object)** = 400 scenarios, on **one env** with the target geom
-   swapped. Success = Euclidean delta within a **swept sphere radius `x`** (mean delta + success@x).
-   Steps: (a) add cup/box + distractors to `franka_build.py`; (b) `scripts/generate_task_bundles.py`
-   — a scripted expert renders start/sub-goals/goal + states + camera per scenario into `tasks/…`,
-   validated (expert must complete it) with contact sheets for inspection; (c) a `--bundles` loader in
-   `run_closed_loop_benchmark.py` (deterministic, replaces `_rand_cube_xy`); (d) run at samples
-   200/400/800 and report per (task, object). Paper-faithful goal frames: reach 1, grasp 1,
-   reach_with_object 1 (object starts in hand), pick_place 3 sub-goals on the fixed 4/10/4 schedule
-   (arXiv 2506.09985 §4.2, Table 3). No robomimic dependency. (`docs/experiments/closed_loop_benchmark.md`.)
+   with **fixed, saved task bundles** and run **grasp / reach_with_object / grasp_and_reach /
+   pick_place** on **two objects** (a rim-graspable **cube cup** and a rigid **box**), **50 trials per
+   (task, object)** = 400 scenarios, on **one env** with the target geom swapped. The set is inspired
+   by the paper's robot tasks (arXiv 2506.09985 Table 3) but drops plain reach as uninteresting and
+   adds the 2-goal grasp_and_reach composition. Success = Euclidean delta within a **swept sphere
+   radius `x`** (mean delta + success@x). Steps: (a) add cup/box + distractors to `franka_build.py`;
+   (b) `scripts/generate_task_bundles.py` — a scripted expert renders start/sub-goals/goal + states +
+   camera per scenario into `tasks/…`, validated (expert must complete it) with contact sheets for
+   inspection; (c) a `--bundles` loader in `run_closed_loop_benchmark.py` (deterministic, replaces
+   `_rand_cube_xy`); (d) run at samples 200/400/800 and report per (task, object). Goal frames:
+   grasp = 1 goal (object just grabbed, not lifted; scripted lift tests success); reach_with_object =
+   1 goal (object starts in hand); grasp_and_reach = 2 goals (`goal_1` just grabbed, `goal` held-object
+   target); pick_place = 3 goals (`goal_1`, `goal_2`, `goal`) on the fixed 4/10/4 schedule. No
+   robomimic dependency. (`docs/experiments/closed_loop_benchmark.md`.)
 2. **W* calibration + re-run.** Fit/freeze the App. B.4 horizontal rotation for the planning
    camera and re-run the benchmark; expect grasp/place error to drop -- the first improvement delta.
-3. **FrankaDroidEnv closed-loop pick/place** — DONE (Reach/Grasp/Place runner + hidden success).
+3. **FrankaDroidEnv closed-loop pick/place pilot** — DONE (early runner + hidden success).
 4. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
    task data; re-run benchmark 1 (same n/H/K/seed) + the closed-loop benchmark (same protocol) and
    report improvement as metric deltas vs the vanilla baselines.
@@ -78,14 +81,15 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
       reach succeeds; multi-goal chaining works. Interface calibration (W*) still pending.
 - [x] Graspable-object env substrate: cube + place zone + hidden success functions
       (`src/bench/success.py`), scripted grasp-lift regression passes.
-- [x] Closed-loop task-success benchmark runner (Reach/Grasp/Place/Pick-Place) with
-      multi-threshold precision curves, paper-faithful pick_place (4/10/4), CEM chunking, and a
-      GT-vs-V-JEPA side-by-side demo.
+- [x] Closed-loop task-success benchmark runner with multi-threshold precision curves,
+      paper-faithful pick_place (4/10/4), CEM chunking, and a GT-vs-V-JEPA side-by-side demo.
 - [x] **Fixed-bundle rebuild (objects + generator):** cup + box objects (+ distractors) in
-      `franka_build.py` (cup = procedural rim-graspable open cylinder; verified rim grasp with one
-      finger inside); `reach_with_object` task; `scripts/generate_task_bundles.py` scripted-expert
-      generator with randomized start poses + paper-like moves; **400 bundles** generated under
-      `tasks/` (reach/grasp/reach_with_object/pick_place x cup/box x 50, 0 skipped).
+      `franka_build.py` (cup = cube cup/open-top square box; one-wall rim grasp with one finger
+      inside and one outside); `scripts/generate_task_bundles.py` scripted-expert generator with
+      randomized arm+object starts, wide variety, and a mocap place zone randomized per pick_place
+      trial; **400 bundles** under `tasks/` (grasp/reach_with_object/grasp_and_reach/pick_place x
+      cup/box x 50, 0 skipped), inspected + approved via `scripts/inspect_task_viewer.py` (live
+      MuJoCo window, N/B to step stages).
 - [ ] **`--bundles` loader:** make `run_closed_loop_benchmark.py` LOAD the fixed bundles (restore
       qpos0, use saved goal images, handle `start_grasped`) instead of `_rand_cube_xy`; add tests;
       then run at samples 200/400/800.
