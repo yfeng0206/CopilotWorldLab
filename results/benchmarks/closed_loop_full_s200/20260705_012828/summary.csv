@@ -1,2 +1,0 @@
-task,n,mean_err_m,median_err_m,p75_err_m,p90_err_m,mean_steps,mean_vjepa_steps,mean_cem_s,thresholds_m,success_rates
-reach,50,0.0248,0.0236,0.0317,0.0354,5.7,4.7,25.03,"[0.05, 0.03, 0.015]","{""0.05"": 0.96, ""0.03"": 0.7, ""0.015"": 0.24}"
