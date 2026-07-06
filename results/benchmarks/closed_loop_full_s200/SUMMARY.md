@@ -42,3 +42,31 @@ Each rollout records one continuous error; `success@t` = error < t AND all physi
 
 Per-task reports (summary.md/csv, plots, selected best/median/worst GIFs) are in the timestamped
 subdirectories. The 400- and 800-sample stages follow (sample ablation).
+
+## Comparison to the paper (V-JEPA 2-AC)
+
+Same released config (samples 400, cem_steps 10, T=2, topk 10, momentum 0.15/0.15, maxnorm 0.05 --
+identical to `world_model_wrapper.py`) and protocol (single-goal reach/grasp, 4/10/4 pick-and-place),
+but in uncalibrated MuJoCo sim (4 cm cube, 50 trials, geometric success gate) vs the paper's real
+Franka + Cup/Box, 10 trials, human-judged task completion. Compared at our loosest threshold:
+
+| task | paper (real robot) | ours (sim) | verdict |
+|---|---|---|---|
+| Reach | 100% | **96%** @5cm | reproduced |
+| Grasp | Cup 60% / Box 20% | **54%** @6cm | reproduced (in range) |
+| Pick-Place | Cup 80% / Box 50% | **6%** @10cm | large gap -- uncalibrated camera frame (no W*), single small cube, stricter scoring |
+
+Reach and grasp reproduce the paper. Pick-place is the honest vanilla-baseline gap the W* frame
+calibration + predictor fine-tuning (Phases 2-4) must close.
+
+### Where pick-place fails (traced, all 50 trials)
+
+Same 3 sub-goals / 4/10/4 schedule as the paper -- the gap is not a goal-count difference.
+- **grasp_failed 38%**: 4-step grasp budget too tight (gripper 2.7cm from cube on failures vs 1.5cm
+  on successes; our standalone 6-step grasp hits 54%).
+- **outside_zone 58%**: held cube needs +25.2cm to the zone but moves only +5.6cm (**22% of needed**);
+  direction correct, but **15/31 stall** (<3cm). Root cause: a small 4cm cube barely registers in the
+  latent vs the dominant arm/gripper, so the transport gradient flattens and stalls ~20cm short --
+  object-salience + uncalibrated frame (W*), not goal design.
+
+
