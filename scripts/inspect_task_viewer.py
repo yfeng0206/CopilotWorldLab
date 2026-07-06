@@ -27,14 +27,16 @@ if _REPO_ROOT not in sys.path:
 
 TASK_ORDER = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
 STAGE_KEYS = ["qpos_start", "qpos_goal_1", "qpos_goal_2", "qpos_goal"]
-KEY_SPACE = 32
-KEY_BACKSPACE = 259  # GLFW
+KEY_NEXT = ord("N")      # 'N' = next stage (SPACE is reserved by the viewer for pause)
+KEY_PREV = ord("B")      # 'B' = previous stage
+KEY_RIGHT = 262          # right arrow (alternate next)
+KEY_LEFT = 263           # left arrow (alternate previous)
 
 
-def _collect_stages(tasks_dir, obj):
-    """Return [(label, qpos), ...] over all tasks (first bundle each) for this object."""
+def _collect_stages(tasks_dir, obj, tasks):
+    """Return [(label, qpos), ...] over the given tasks (first bundle each) for this object."""
     stages = []
-    for task in TASK_ORDER:
+    for task in tasks:
         obj_dir = os.path.join(tasks_dir, task, obj)
         if not os.path.isdir(obj_dir):
             continue
@@ -53,6 +55,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--object", choices=["cup", "box"], default="cup")
+    p.add_argument("--tasks", nargs="+", default=TASK_ORDER, choices=TASK_ORDER,
+                   help="restrict to these tasks (default: all four)")
     p.add_argument("--tasks-dir", default=os.path.join(_REPO_ROOT, "tasks_verify"))
     args = p.parse_args()
 
@@ -64,7 +68,7 @@ def main():
                                  add_distractors=True)
     data = mujoco.MjData(model)
 
-    stages = _collect_stages(args.tasks_dir, args.object)
+    stages = _collect_stages(args.tasks_dir, args.object, args.tasks)
     if not stages:
         raise SystemExit(f"no stages found under {args.tasks_dir} for object={args.object} "
                          f"(generate bundles first)")
@@ -79,15 +83,16 @@ def main():
         print(f"[{i + 1}/{len(stages)}]  {label}", flush=True)
 
     def key_callback(keycode):
-        if keycode == KEY_SPACE:
+        if keycode in (KEY_NEXT, KEY_RIGHT):
             idx["i"] = (idx["i"] + 1) % len(stages)
             apply(idx["i"])
-        elif keycode == KEY_BACKSPACE:
+        elif keycode in (KEY_PREV, KEY_LEFT):
             idx["i"] = (idx["i"] - 1) % len(stages)
             apply(idx["i"])
 
     print(f"=== inspecting object={args.object}: {len(stages)} stages ===")
-    print("SPACE = next stage, BACKSPACE = previous stage, mouse = orbit/zoom, close window = quit")
+    print("N = next stage, B = previous stage (or right/left arrow), mouse = orbit/zoom, "
+          "close window = quit")
     apply(0)
     with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
         while viewer.is_running():

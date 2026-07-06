@@ -125,12 +125,14 @@ class FrankaDroidEnv:
         self._cube_bid = -1
         self._cube_qadr = -1
         self._zone_bid = -1
+        self._zone_mocap = -1
         if self.add_object:
             self._cube_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, CUBE_BODY)
             cube_jid = int(self.model.body_jntadr[self._cube_bid])
             self._cube_qadr = int(self.model.jnt_qposadr[cube_jid])
         if self.add_zone:
             self._zone_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, PLACE_ZONE_BODY)
+            self._zone_mocap = int(self.model.body_mocapid[self._zone_bid])
 
         self._gripper_cmd = 0.0  # commanded gripper in [0, 1] (0 = open, 1 = closed)
         self.last_ik_pos_err = 0.0
@@ -161,6 +163,18 @@ class FrankaDroidEnv:
         z = TABLE_TOP_Z + self.object_rest_half_z
         self.data.qpos[self._cube_qadr:self._cube_qadr + 3] = [x, y, z]
         self.data.qpos[self._cube_qadr + 3:self._cube_qadr + 7] = [1.0, 0.0, 0.0, 0.0]
+
+    def place_object(self, x: float, y: float, settle: int = 40) -> None:
+        """Set the manipuland resting upright on the table at ``(x, y)`` and settle it. Used to build
+        a placed goal state (e.g. object in the place zone) without relying on a flaky physical
+        release. No-op if there is no object."""
+        if self._cube_qadr < 0:
+            return
+        self._place_cube((x, y))
+        self.data.qvel[:] = 0.0
+        self._mujoco.mj_forward(self.model, self.data)
+        for _ in range(int(settle)):
+            self._mujoco.mj_step(self.model, self.data)
 
     # ------------------------------------------------------- privileged object truth
     def object_pose(self) -> np.ndarray:
@@ -194,6 +208,13 @@ class FrankaDroidEnv:
         if self._zone_bid < 0:
             return np.full(2, np.nan, dtype=np.float64)
         return self.data.xpos[self._zone_bid][:2].copy()
+
+    def set_zone_xy(self, x: float, y: float) -> None:
+        """Move the (mocap) place zone to a new xy on the table top; no-op if there is no zone."""
+        if self._zone_mocap < 0:
+            return
+        self.data.mocap_pos[self._zone_mocap] = [float(x), float(y), PLACE_ZONE_CENTER[2]]
+        self._mujoco.mj_forward(self.model, self.data)
 
     def gripper_holds_object(self) -> bool:
         """True if a gripper finger geom is in contact with the cube geom."""

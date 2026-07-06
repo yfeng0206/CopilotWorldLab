@@ -47,10 +47,11 @@ BOX_HALF = (0.025, 0.02, 0.03)
 # Cup: a CUBE cup -- an open-top SQUARE box (bottom + 4 flat walls; MuJoCo has no hollow primitive),
 # grasped on ONE wall's rim (one finger inside the cup, one outside that wall: \|/ ). Flat walls make
 # the rim grasp far easier/cleaner than a round cup (paper's Cup object, but box-shaped for the sim).
-CUP_OUTER_R = 0.03         # outer half-width (6 cm across, within the 2F-85 ~85 mm stroke)
+# Kept short (low centre of mass) so a one-wall rim grasp stays roughly upright when lifted/carried.
+CUP_OUTER_R = 0.032        # outer half-width (6.4 cm across, within the 2F-85 ~85 mm stroke)
 CUP_WALL_T = 0.006         # wall thickness
-CUP_HALF_H = 0.035         # 7 cm tall
-CUP_BOTTOM_HALF = 0.004    # bottom plate half-thickness
+CUP_HALF_H = 0.026         # 5.2 cm tall (short -> low COM -> stable one-wall grasp)
+CUP_BOTTOM_HALF = 0.006    # bottom plate half-thickness (thick -> bottom-heavy, self-righting)
 
 # Per-object rest half-height (for placing the object resting on the table), grasp style, the grasp
 # z offset from the object CENTRE, and an xy grasp offset. cube/box grasp top-down at the centre; the
@@ -278,6 +279,7 @@ def build_franka_robotiq(menagerie_dir: str = DEFAULT_MENAGERIE, add_camera: boo
     if add_zone:
         zone = world.add_body()
         zone.name = PLACE_ZONE_BODY
+        zone.mocap = True  # movable per trial (data.mocap_pos), so pick-place goals vary
         zone.pos = list(PLACE_ZONE_CENTER)
         marker = zone.add_geom()
         marker.name = "place_zone_marker"

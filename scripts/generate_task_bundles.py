@@ -62,30 +62,46 @@ X_SWEEP = {
 }
 
 
-def _goto(env, pos, grip=None, n=6):
-    """Scripted straight-line EE move (the expert), optionally actuating the gripper afterwards."""
+def _goto(env, pos, grip=None, n=10, step=0.05):
+    """Scripted straight-line EE move (the expert), optionally actuating the gripper afterwards.
+
+    Each physics action is capped to ``step`` metres so the differential IK stays inside its
+    tolerance (apply_action is atomic: an over-long move that exceeds the IK tolerance is rejected
+    outright, which would freeze the arm). Small capped steps make the move reliable everywhere in
+    the workspace, at the cost of more (offline) steps."""
+    pos = np.asarray(pos, dtype=float)
     for _ in range(n):
         cur = env.get_ee_state()[:3]
+        delta = pos - cur
+        dist = float(np.linalg.norm(delta))
+        if dist < 0.004:
+            break
         d = np.zeros(7)
-        d[:3] = np.asarray(pos, dtype=float) - cur
+        d[:3] = delta * min(1.0, step / dist)   # cap per-step translation for reliable IK
         env.apply_action(d)
     if grip is not None:
-        for _ in range(4):
+        for _ in range(5):
             g = np.zeros(7)
             g[6] = grip
             env.apply_action(g)
 
 
 def _sample_obj_xy(rng):
-    """A randomized, reachable object start spread across the near half of the table (clear of the
-    fixed place zone at y=0.15). Wider than the old range so the 50 scenarios are visibly distinct."""
-    return (float(rng.uniform(0.42, 0.58)), float(rng.uniform(-0.20, 0.00)))
+    """A randomized, reachable object start spread widely across the table so the 50 scenarios differ
+    clearly in object placement (kept clear of the place zone's default location)."""
+    return (float(rng.uniform(0.40, 0.60)), float(rng.uniform(-0.24, 0.06)))
+
+
+def _sample_zone_xy(rng):
+    """A randomized reachable place-zone location (far half of the table) for pick_place, so the
+    place goal varies across scenarios instead of always being the same fixed zone."""
+    return (float(rng.uniform(0.40, 0.60)), float(rng.uniform(0.08, 0.24)))
 
 
 def _random_start_ee(rng):
     """A randomized reachable EE hover pose above the table -- the per-trial *starting pose* the paper
-    permutes (arXiv 2506.09985 4.2), so start frames differ across the 50 scenarios."""
-    return np.array([rng.uniform(0.42, 0.58), rng.uniform(-0.16, 0.12), rng.uniform(0.36, 0.48)])
+    permutes (arXiv 2506.09985 4.2), so start frames differ widely across the 50 scenarios."""
+    return np.array([rng.uniform(0.40, 0.60), rng.uniform(-0.22, 0.20), rng.uniform(0.34, 0.50)])
 
 
 def _far_pose(rng, ref, lo, hi, min_sep=0.12):
@@ -214,6 +230,7 @@ def build_pick_place(env, rng, obj):
     """grasp -> vicinity -> place, fixed 4/10/4. goal_1 = just grabbed (on table), goal_2 = held in
     the vicinity of the zone, goal = object PLACED in the zone (released, gripper away)."""
     env.reset(cube_xy=_sample_obj_xy(rng))
+    env.set_zone_xy(*_sample_zone_xy(rng))  # randomized place zone (varies the place goal per trial)
     _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
     start_img = env.render("planning")
     arrays = _base_arrays(env)  # qpos0 = initial, object on the table
@@ -229,26 +246,33 @@ def build_pick_place(env, rng, obj):
         return None, None, None, False
     goal_1 = env.render("planning")                        # LIVE: just grabbed, on the table
     arrays["qpos_goal_1"] = env.data.qpos.copy()
-    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for transport
+    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0, n=8)  # gentle lift for transport
     # the object hangs off the TCP by the grasp offset (rim grasp); shift the transport targets by
     # that hold offset so the OBJECT -- not the gripper -- ends over the zone.
     hold_off = env.get_ee_state()[:3] - env.object_position()
-    vicinity_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.12])
-    place_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.03])
+    vicinity_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.05])
     arrays["vicinity_pos"] = vicinity_pos.astype(float)
-    arrays["place_pos"] = place_pos.astype(float)
-    _goto(env, vicinity_pos, grip=1.0)
+    _goto(env, vicinity_pos, grip=1.0, n=10)               # gentle carry to reduce swing/tilt
     goal_2 = env.render("planning")                        # LIVE: held in the vicinity of the zone
     arrays["qpos_goal_2"] = env.data.qpos.copy()
-    _goto(env, place_pos, grip=1.0)
-    _goto(env, place_pos, grip=-1.0)                       # release
-    for _ in range(2):
-        _goto(env, place_pos + np.array([0, 0, 0.12]), n=3)  # retract the arm away
-    goal_g = env.render("planning")                        # LIVE: object placed in the zone
+    # Build the PLACED goal as the intended target state: retract the arm open above the zone and set
+    # the object resting upright IN the zone, then settle. (A physical one-wall-rim release is too
+    # flaky -- the inside finger hooks the cup -- but the placed goal image is a legitimate target, so
+    # we construct it directly and verify it is a valid resting state.)
+    env.set_ee_pose(pos=[zone[0], zone[1], TABLE_TOP_Z + 0.30], euler=EE_DOWN, gripper=0.0)
+    for _ in range(4):
+        env.apply_action(np.array([0., 0., 0., 0., 0., 0., -1.0]))  # open the fingers, hold the pose
+    env.place_object(zone[0], zone[1])                     # object settles upright in the zone
+    place_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + half])
+    arrays["place_pos"] = place_pos.astype(float)
+    goal_g = env.render("planning")                        # LIVE: object placed in the zone, arm clear
     arrays["qpos_goal"] = env.data.qpos.copy()
-    err = float(np.linalg.norm(env.object_position()[:2] - zone[:2]))
-    ok = err < 0.06
-    arrays["goal_object"] = env.object_position().copy()
+    obj_final = env.object_position()
+    err = float(np.linalg.norm(obj_final[:2] - zone[:2]))
+    on_table = (obj_final[2] - (TABLE_TOP_Z + half)) < 0.02
+    upright = np.degrees(env.object_tilt()) < 20.0
+    ok = err < 0.06 and env.object_released() and on_table and upright
+    arrays["goal_object"] = obj_final.copy()
     return {"start": start_img, "goal_1": goal_1, "goal_2": goal_2, "goal": goal_g}, arrays, \
         {"start_grasped": False}, ok
 
