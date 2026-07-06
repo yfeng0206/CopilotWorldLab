@@ -84,6 +84,10 @@ Counts: **4 tasks × 2 objects × 50 scenarios = 400 bundles** (100 trials/task:
 deterministic and re-runnable. Every scenario is validated at generation time — the scripted expert
 must complete it — so each saved bundle has a well-defined, measurable hidden success/failure.
 
+A tiny tracked sample set lives under [`../../examples/task_bundles/`](../../examples/task_bundles/):
+one scenario for every task/object pair. It is intended for peer inspection and smoke tests; full
+benchmark runs should use locally generated bundles under the gitignored `tasks/` directory.
+
 ## Paper protocol (verified) and our stage mapping
 
 Goal-image counts are based on the V-JEPA 2 paper protocol (arXiv 2506.09985 §4.2), with one

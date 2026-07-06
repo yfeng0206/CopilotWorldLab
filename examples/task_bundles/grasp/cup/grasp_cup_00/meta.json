@@ -1,0 +1,36 @@
+{
+  "task_id": "grasp_cup_00",
+  "task": "grasp",
+  "object": "cup",
+  "index": 0,
+  "seed": 1000,
+  "camera": {
+    "azimuth": -45.0,
+    "elevation": -45.0,
+    "distance": 1.5,
+    "lookat": [
+      0.5,
+      0.0,
+      0.35
+    ]
+  },
+  "image_hw": [
+    256,
+    256
+  ],
+  "units": "meters",
+  "ee_euler_down": [
+    3.141592653589793,
+    0.0,
+    0.0
+  ],
+  "success_spec": {
+    "type": "grasp",
+    "x_sweep_cm": [
+      6.0,
+      3.0,
+      2.0
+    ]
+  },
+  "start_grasped": false
+}

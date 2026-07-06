@@ -124,56 +124,56 @@ selected GIFs) once the fixed-bundle runs complete.
 
 ## 3. Data schema (saved benchmark task)
 
-A task **bundle** is a directory `tasks/<task_id>/`:
+A task **bundle** is a directory `tasks/<task>/<object>/<task_id>/`:
 
 ```
-tasks/<task_id>/
+tasks/<task>/<object>/<task_id>/
   meta.json          # everything the evaluator + planner need (below)
   start.png          # observation at t0 (planner input)
   goal.png           # goal image (planner target); goal_1.png, goal_2.png for multi-stage
-  arrays.npz         # start_state, goal_state, object_state, target_state, ...
-  model.xml          # patched MJCF for closed-loop stepping (Option A)
-  contact_sheet.png  # visual check: sampled trajectory with state/action overlay
-  rollout.gif        # visual check: full demo playback
+  arrays.npz         # qpos0/qvel0, per-stage qpos, object/zone/target arrays
+  contact_sheet.png  # visual check: start | sub-goals | goal strip
 ```
 
 `meta.json`:
 ```json
 {
   "task_id": "grasp_and_reach_cup_00",
-  "task_type": "grasp_and_reach",
+  "task": "grasp_and_reach",
   "object": "cup",
-  "source": "scripted_expert",
-  "camera": "planning",
+  "index": 0,
+  "seed": 101003,
+  "camera": {"azimuth": -45.0, "elevation": -45.0, "distance": 1.5, "lookat": [0.5, 0.0, 0.35]},
   "image_hw": [256, 256],
-  "fps": 20,
   "units": "meters",
-  "robot_ee_convention": "xyz+euler+gripper (7-D)",
-  "object_body": "object",
-  "target": {"type": "object_goal", "center": [x,y,z]},
-  "success_spec": {                        // thresholds the evaluator uses (Section 4)
+  "ee_euler_down": [3.141592653589793, 0.0, 0.0],
+  "success_spec": {
     "type": "grasp_and_reach",
-    "x_sweep_cm": [6, 3, 1.5]
+    "x_sweep_cm": [10, 6, 3, 1.5]
   },
-  "seed": 0
+  "start_grasped": false
 }
 ```
 
-`arrays.npz` (all float32 unless noted):
+`arrays.npz` keys vary by task:
 ```
-start_state   [7]     EE (x,y,z,roll,pitch,yaw,gripper) at t0
-goal_state    [7]     EE at goal
-object_state  [7]     object pose (x,y,z, quat wxyz) at t0
-goal_object_state [7] object pose at goal (for lift/place references)
-target_state  [7|4]   target pose or (center xyz + radius) for the task
-qpos0         [nq]    full MuJoCo qpos at t0 (to reset the steppable env)
-qvel0         [nv]    full MuJoCo qvel at t0
-actions       [T,7]   demo actions (reference / for scripted lift-place phases)
+qpos0            [nq]  full MuJoCo qpos at the saved start (benchmark restore state)
+qvel0            [nv]  full MuJoCo qvel at the saved start
+qpos_start       [nq]  viewer start stage
+qpos_goal_1      [nq]  first sub-goal stage, if present
+qpos_goal_2      [nq]  second sub-goal stage, if present
+qpos_goal        [nq]  final goal stage
+object_pose      [7]   object pose at start (xyz + quat wxyz)
+goal_object      [3]   final object target for held-object tasks
+grasp_pos        [3]   EE target for grasp stages
+goal_ee          [3]   EE target for reach_with_object / grasp_and_reach
+vicinity_pos     [3]   pick_place sub-goal 2 EE target
+place_pos        [3]   pick_place final object/zone target
+zone             [2]   place-zone xy
 ```
 
-`TaskBundle.save(dir)` / `TaskBundle.load(dir)` in `src/bench/schema.py`; the planner reads only
-`start.png`, `goal.png`, `start_state`; the evaluator reads privileged `object_state`,
-`target_state`, contacts/velocities from the live sim.
+`TaskBundle.save(dir)` / `TaskBundle.load(dir)` in `src/bench/schema.py`; the runner restores `qpos0`,
+plans to the saved goal images, and evaluates privileged state from the live sim.
 
 ---
 

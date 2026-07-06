@@ -75,6 +75,7 @@ scripts/energy_landscape_repro.py, render_franka_transitions.py, analyze_frame_r
 scripts/benchmark_transition_scoring.py, extract_droid_transitions.py, plot_transition_benchmark.py
 scripts/cem_reach_loop.py, plot_cem_loop.py     Closed-loop CEM planning to goal image(s)
 tasks/                           Fixed, inspectable task bundles (grasp/reach_with_object/grasp_and_reach/pick_place x cup/box)
+examples/task_bundles/           Tiny tracked sample: one bundle per task/object pair for peer inspection
 tests/                           Geometry, Franka env, grasp physics, success, thresholds, utils
 docs/                            architecture, DESIGN, experiments/, research_log, lessons_learned, ...
 ```

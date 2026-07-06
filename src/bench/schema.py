@@ -3,18 +3,17 @@
 A task *bundle* is a self-contained directory describing one benchmark task, split into what the
 model may see and what only the evaluator sees (docs/experiments/closed_loop_success_plan.md):
 
-    tasks/<task_id>/
-        meta.json          task_type, difficulty, source, camera, success_spec, target, ...
+    tasks/<task>/<object>/<task_id>/
+        meta.json          task, object, camera, success_spec, seed, start_grasped, ...
         start.png          observation at t0 (planner input)
         goal.png           goal image (planner target); goal_1.png, goal_2.png for multi-stage
-        arrays.npz         start_state, goal_state, object_state, target_state, qpos0, ...
-        model.xml          patched MJCF for closed-loop stepping (optional)
+        arrays.npz         qpos0/qvel0, qpos_start, qpos_goal(_1/_2), object_pose,
+                           goal_object, grasp_pos, goal_ee, zone, ...
         contact_sheet.png  visual check artifact (optional)
-        rollout.gif        visual check artifact (optional)
 
-The planner reads only ``start.png``, ``goal.png`` and ``start_state``; the evaluator reads the
-privileged arrays plus the live simulator. Kept dependency-light (numpy + imageio) so bundles can
-be created/inspected without a GL context or the world model.
+The planner reads RGB goal images and restored qpos; the evaluator reads privileged arrays plus the
+live simulator. Kept dependency-light (numpy + imageio) so bundles can be created/inspected without
+the world model.
 """
 from __future__ import annotations
 
@@ -28,10 +27,10 @@ import numpy as np
 
 @dataclass
 class TaskBundle:
-    """One benchmark task. ``meta`` holds JSON-serialisable metadata (task_type, difficulty,
-    source, camera, image_hw, fps, units, object_body, target, success_spec, seed, ...);
+    """One benchmark task. ``meta`` holds JSON-serialisable metadata (task, object, camera,
+    image_hw, units, success_spec, seed, start_grasped, ...);
     ``images`` maps a name (``start``, ``goal``, ``goal_1``, ...) to an HxWx3 uint8 array;
-    ``arrays`` maps a name to a numeric array; ``model_xml`` is the patched MJCF (optional)."""
+    ``arrays`` maps a name to a numeric array; ``model_xml`` is optional for external tasks."""
 
     meta: dict
     images: dict[str, np.ndarray] = field(default_factory=dict)

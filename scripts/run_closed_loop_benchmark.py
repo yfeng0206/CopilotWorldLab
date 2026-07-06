@@ -18,8 +18,10 @@ Two modes:
   (legacy)         random-per-trial reach / grasp_lift / place / pick_place (stably seeded; see
                    TASK_SEED_OFFSET). Used before the fixed bundles existed.
 
-CEM config (defaults follow Meta's released wrapper; smaller population for the 3090):
-    samples=200, cem_steps=10, rollout/horizon T=2, topk=10, maxnorm=0.05 m/axis, momentum 0.15.
+CEM config (paper p.37: 800 samples, 10 refinement steps, top-10, planning horizon 1; maxnorm ~0.075
+per section 4.1). Defaults here use the paper's horizon T=1; samples/maxnorm are swept:
+    samples=200 (paper 800), cem_steps=10, horizon T=1, topk=10, maxnorm=0.05 m/axis (paper ~0.075),
+    momentum 0.15.
 
 One continuous error per trial -> success@multiple precision thresholds computed from a single run.
 Full run-log (config + per-step CSV + per-trial CSV + selected viz) lands under
@@ -1237,7 +1239,8 @@ def main() -> None:
                         "caps peak VRAM for samples=800 (mathematically identical, samples are "
                         "independent). Default 400: 200/400 run whole-batch, 800 splits in two")
     p.add_argument("--cem-steps", type=int, default=10)
-    p.add_argument("--rollout", type=int, default=2, help="CEM planning horizon T")
+    p.add_argument("--rollout", type=int, default=1,
+                   help="CEM planning horizon T (paper p.37 = 1; each candidate is one next action)")
     p.add_argument("--topk", type=int, default=10)
     p.add_argument("--maxnorm", type=float, default=0.05, help="CEM per-axis action clip (m)")
     p.add_argument("--pos-tol", type=float, default=0.015,

@@ -1,0 +1,37 @@
+{
+  "task_id": "grasp_and_reach_box_00",
+  "task": "grasp_and_reach",
+  "object": "box",
+  "index": 0,
+  "seed": 251006,
+  "camera": {
+    "azimuth": -45.0,
+    "elevation": -45.0,
+    "distance": 1.5,
+    "lookat": [
+      0.5,
+      0.0,
+      0.35
+    ]
+  },
+  "image_hw": [
+    256,
+    256
+  ],
+  "units": "meters",
+  "ee_euler_down": [
+    3.141592653589793,
+    0.0,
+    0.0
+  ],
+  "success_spec": {
+    "type": "grasp_and_reach",
+    "x_sweep_cm": [
+      10.0,
+      6.0,
+      3.0,
+      1.5
+    ]
+  },
+  "start_grasped": false
+}
