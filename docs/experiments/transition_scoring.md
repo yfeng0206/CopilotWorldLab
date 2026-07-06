@@ -1,5 +1,10 @@
 # Transition Scoring — Vanilla V-JEPA 2-AC on Real DROID (Benchmark 1)
 
+> Status: historical Phase-0 record. The committed figures/CSVs (under
+> `results/benchmarks/droid_transition_scoring*`) were removed in the 2026-07-05 clean-slate reset and
+> remain recoverable from git history. This transition-ranking baseline (rank_frac 0.820) is separate
+> from the Phase-1 closed-loop task-success benchmark.
+
 **Question.** Does the vanilla (unmodified) V-JEPA 2-AC model actually *understand real robot
 transitions* — i.e., does it score the executed action lower in latent energy than random
 alternatives, and does that ranking depend on the goal image? This is a **world-model transition

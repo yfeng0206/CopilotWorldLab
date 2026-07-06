@@ -13,7 +13,7 @@ limits. Style follows the I-JEPA_3D_OCT experiment docs.
 | **View-relative frame** | Is a weak camera unusable, or just uncalibrated? | Horizontal frame is view-relative; fitted W* rotation tracks azimuth; most side cameras recover to cos **0.70-0.95** | [energy_landscape_and_camera_ablation.md](energy_landscape_and_camera_ablation.md#result-3--the-horizontal-action-frame-is-view-relative-confound-resolved) |
 | **Transition scoring (benchmark 1)** | Does vanilla V-JEPA 2-AC understand real transitions? | True action beats random negatives on 300 real DROID transitions — rank **0.820** vs different-episode null **0.486** (+0.334 goal-image effect), top1 0.320 | [transition_scoring.md](transition_scoring.md) |
 | **Closed-loop CEM (Phase 1)** | Can V-JEPA 2-AC plan to a goal image in a control loop, and chain sub-goals? | Reach **succeeds** (goal image in 3 steps, 2 cm); 2-goal chain advances sub-goals; lateral sub-goal plateaus at ~3-4 cm (vanilla precision floor) | [cem_closed_loop.md](cem_closed_loop.md) |
-| **Closed-loop task success (Phase 1)** | How well does vanilla V-JEPA 2-AC do Reach / Grasp-Lift / Place, at what precision, and does paper-like multistage sub-goaling help? | Reach mean **2.4 cm** (100%@5cm); Grasp-Lift **multistage helps** (@3cm 40%→80%, held 3/5→4/5); Place **fails ~15-16 cm** under both protocols — fixing the goal image didn't help, *likely* a precision limit (n=5, confirm at 50) — hidden-state success, n=5/task | [closed_loop_benchmark.md](closed_loop_benchmark.md) |
+| **Closed-loop task success (Phase 1, in rebuild)** | How well does vanilla V-JEPA 2-AC do the paper's four robot tasks (Reach / Grasp / Reach-with-object / Pick-Place) on **cup vs box**, at what precision? | Rebuilding on **fixed, saved task bundles** (4 tasks x cup/box, 50 trials each = 400); success = delta within swept sphere `x`; results pending | [closed_loop_benchmark.md](closed_loop_benchmark.md) |
 
 Primary finding: **camera angle is the dominant zero-shot knob** — moving from the built-in
 `exo_cam` to an over-the-shoulder az45_el45 view improves action-alignment cosine by +1.08 with
@@ -30,28 +30,23 @@ the near top-down view has a genuine depth-observability failure.
 docs/experiments/
   README.md                                    this index
   benchmark_plan.md                            established-benchmark strategy + metrics + stack
-  transition_scoring.md                        benchmark 1: vanilla V-JEPA 2-AC on real DROID transitions
-  energy_landscape_and_camera_ablation.md      correctness gate + camera ablation + frame analysis
-  cem_closed_loop.md                           Phase 1 pilot: closed-loop CEM planning to goal image(s)
+  transition_scoring.md                        benchmark 1: vanilla V-JEPA 2-AC on real DROID transitions (historical)
+  energy_landscape_and_camera_ablation.md      correctness gate + camera ablation + frame analysis (historical)
+  cem_closed_loop.md                           Phase 1 pilot: closed-loop CEM planning to goal image(s) (historical)
   closed_loop_success_plan.md                  closed-loop task-success benchmark strategy
-  closed_loop_benchmark.md                     closed-loop task success: setup, criteria, logging, results
-results/benchmarks/closed_loop_smoke/          single-goal vs multistage GIFs + GT-vs-V-JEPA demo + goal-image check + CSVs
-results/benchmarks/
-  droid_transition_scoring.png                 rank_frac distribution + image-conditioning control
-  droid_transition_scoring.csv                 per-transition source rows
-  droid_transition_scoring_table.md            summary metric table
-results/camera_ablation/
-  camera_grid.png          the 8 camera angles, annotated with cosine / rotation / verdict
-  camera_ranking.png       per-camera mean-cosine bar chart
-  frame_rotation.png       fitted W* rotation vs camera azimuth (view-relative evidence)
-  energy_landscape_*.png   paper-example energy heatmaps (correctness gate)
-  combined_table.md        per-camera summary with improvement-over-baseline
-  per_camera_tables.md     one per-axis table per camera angle (worst -> best)
+  closed_loop_benchmark.md                     closed-loop task success: fixed bundles, cup/box, criteria, logging
+tasks/                                         fixed, inspectable task bundles (reach/grasp/pick_place x cup/box)
+  <task>/<object>/<id>/                        start.png, goal.png, goal_1/2.png, arrays.npz, model.xml, contact_sheet.png
+results/benchmarks/closed_loop_<tag>/          committed per-run reports (summary.md/csv, per task-object figures) once runs complete
 ```
+
+Note: the earlier committed experiment artifacts under `results/` (benchmark reports, camera-ablation
+and energy-landscape figures, transition-scoring CSVs) and the `archive/` scaffolding were removed in
+the clean-slate reset and are recoverable from git history. The historical experiment docs above are
+kept as prior-result records; their inline figure links point at those cleared files.
 
 ## Reference
 
 - [../research_log.md](../research_log.md) — chronological problem/solution log + bibliography
 - [../lessons_learned.md](../lessons_learned.md) — mistakes, fixes, invariants
 - [../vjepa2_ac_architecture.md](../vjepa2_ac_architecture.md) — compute budget + fine-tune plan
-- [../../archive/docs/setup_stage.md](../../archive/docs/setup_stage.md) — pre-experiment setup record (archived)

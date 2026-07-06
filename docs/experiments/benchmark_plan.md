@@ -100,10 +100,15 @@ loop -> step the env -> official success. Two options: (a) run ManiSkill under W
 (b) treat the working MuJoCo `FrankaDroidEnv` as the closed-loop platform and add proper
 pick/place tasks with success labels there (needs the graspable-object scene).
 
-### 3. robomimic / LIBERO — grasp/place task sources (raw-state replay on Windows)
+### 3. robomimic / LIBERO — optional reference image source (not required)
 
-Established imitation-learning demos (Lift, Can, Square, Transport) are the grasp/place *task*
-sources (with success labels), complementary to the DROID transition sanity check in (1).
+> Note: the **Phase-1 closed-loop task-success benchmark does not depend on robomimic.** It runs on
+> our own `FrankaDroidEnv` with **fixed, saved task bundles** and two self-contained objects (cup,
+> box); see [closed_loop_benchmark.md](closed_loop_benchmark.md). robomimic below remains an
+> **optional reference/image source**, not part of the closed loop.
+
+Established imitation-learning demos (Lift, Can, Square, Transport) are a possible grasp/place *task*
+image source (with success labels), complementary to the DROID transition sanity check in (1).
 Verified 2026-07-04: robomimic (v0.5) does **not** host pre-rendered `image` HDF5 — HF ships only
 `low_dim` (proprioception + actions, no images) and `raw` (sim states); the older Stanford
 `image.hdf5` URLs are unreachable. And the robosuite **env runtime** does not step on this Windows
@@ -137,10 +142,11 @@ dataset before proving the method. This intentionally deprioritizes the earlier 
 - The camera-placement ablation is **interface calibration** (which view/frame to plan in), not
   a benchmark.
 - Benchmark (1), transition scoring, is the **first real benchmark with a vanilla baseline**.
-- Closed-loop **task-success** on our own MuJoCo `FrankaDroidEnv` is now measured (Reach / Grasp /
-  Pick-Place, hidden-state success, multi-threshold precision curves; see
-  [closed_loop_benchmark.md](closed_loop_benchmark.md)). Official established-suite closed-loop
-  *rollout* success (robosuite/ManiSkill) is still benchmark (2), gated on Linux/WSL2.
+- Closed-loop **task-success** on our own MuJoCo `FrankaDroidEnv` is the Phase-1 benchmark, measured
+  on **fixed, saved task bundles** over the paper's four robot tasks (Reach / Grasp / Reach-with-object
+  / Pick-Place) x **cup/box** (hidden-state success as delta within a swept sphere `x`, no robomimic
+  dependency; see [closed_loop_benchmark.md](closed_loop_benchmark.md)). Official established-suite
+  closed-loop *rollout* success (robosuite/ManiSkill) is still benchmark (2), gated on Linux/WSL2.
 
 ## Reproducibility
 

@@ -1,5 +1,10 @@
 # Camera-Placement Ablation — V-JEPA 2-AC Zero-Shot Transfer to MuJoCo
 
+> Status: historical Phase-0 record. The committed figures/CSVs this doc references (under
+> `results/camera_ablation/`) were removed in the 2026-07-05 clean-slate reset and remain recoverable
+> from git history. The findings (view-relative frame; `PLANNING_CAMERA` = az45_el45) still inform the
+> current fixed-bundle benchmark.
+
 Does the released V-JEPA 2-AC world model (arXiv:2506.09985), trained on real DROID Franka
 video from an exocentric camera, produce a usable latent *energy landscape* on our MuJoCo
 Franka renders, and which camera angle transfers best? The paper's headline success rates are

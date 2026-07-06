@@ -35,16 +35,18 @@ Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows
 *task* sources (#11/#19); DROID gives the real-robot *transition* baseline. The plan is
 benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
-1. **Run the full 50-trial precision-curve benchmark** (paper-faithful, split per task). The runner
-   records a continuous error per trial and computes success at many thresholds. Paper-faithful
-   protocol (arXiv 2506.09985 §4.2, verified): **reach** (1 goal), **grasp_lift** single-goal
-   (1 goal; multistage kept as a labeled ablation), **pick_place** (3 sub-goals, fixed 4/10/4).
-   Split calls per task so each gets its fair protocol:
-   `--tasks reach grasp_lift --trials 50 --tag full` and `--tasks pick_place --trials 50 --tag full`.
-   Smoke (n=5): **Reach mean 2.4cm (100%@5cm); Grasp multistage helps (@3cm 40%→80%, held 3/5→4/5);
-   Place ~15-16cm** (both protocols; likely a precision limit, confirm at 50). pick_place validated
-   1 trial (grasp holds; honest hard-task ~29cm). Side-by-side GT-vs-V-JEPA demo done
-   (`--demo reach`). (`docs/experiments/closed_loop_benchmark.md`.)
+1. **Fixed-bundle closed-loop benchmark (Phase 1, in build).** Replace the random-per-trial scenarios
+   with **fixed, saved task bundles** and run the paper's **four robot tasks** — **Reach / Grasp /
+   Reach-with-object / Pick-Place** — on **two objects** (a rim-graspable **cup** and a rigid
+   **box**), **50 trials per (task, object)** = 400 scenarios, on **one env** with the target geom
+   swapped. Success = Euclidean delta within a **swept sphere radius `x`** (mean delta + success@x).
+   Steps: (a) add cup/box + distractors to `franka_build.py`; (b) `scripts/generate_task_bundles.py`
+   — a scripted expert renders start/sub-goals/goal + states + camera per scenario into `tasks/…`,
+   validated (expert must complete it) with contact sheets for inspection; (c) a `--bundles` loader in
+   `run_closed_loop_benchmark.py` (deterministic, replaces `_rand_cube_xy`); (d) run at samples
+   200/400/800 and report per (task, object). Paper-faithful goal frames: reach 1, grasp 1,
+   reach_with_object 1 (object starts in hand), pick_place 3 sub-goals on the fixed 4/10/4 schedule
+   (arXiv 2506.09985 §4.2, Table 3). No robomimic dependency. (`docs/experiments/closed_loop_benchmark.md`.)
 2. **W* calibration + re-run.** Fit/freeze the App. B.4 horizontal rotation for the planning
    camera and re-run the benchmark; expect grasp/place error to drop -- the first improvement delta.
 3. **FrankaDroidEnv closed-loop pick/place** — DONE (Reach/Grasp/Place runner + hidden success).
@@ -60,7 +62,8 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
 
 - [x] Reproducible local environment (venv + CUDA Torch + MuJoCo), verified on the 3090.
 - [x] MuJoCo Franka scene and `FrankaDroidEnv` (render, real 7-DoF EE, goal capture). The
-      earlier kinematic `MujocoPilotEnv` is archived (`archive/src/mujoco_scene.py`).
+      earlier kinematic `MujocoPilotEnv` was removed in the clean-slate reset (recoverable from git
+      history).
 - [x] V-JEPA 2-AC interface scaffold and download-only checkpoint fetch.
 - [x] Test suite (geometry, Franka env, grasp physics, success, utils) passing.
 - [x] Franka Panda (MuJoCo Menagerie) loaded, rendered, actuated, and timed (smoke test).
@@ -75,10 +78,13 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
       reach succeeds; multi-goal chaining works. Interface calibration (W*) still pending.
 - [x] Graspable-object env substrate: cube + place zone + hidden success functions
       (`src/bench/success.py`), scripted grasp-lift regression passes.
-- [x] Closed-loop task-success benchmark runner (Reach/Grasp-lift/Place/Pick-Place) with
+- [x] Closed-loop task-success benchmark runner (Reach/Grasp/Place/Pick-Place) with
       multi-threshold precision curves, paper-faithful pick_place (4/10/4), CEM chunking, and a
-      GT-vs-V-JEPA side-by-side demo. n=5 smoke + single-vs-multistage comparison done; full
-      50-trial run (samples 200/400/800) pending.
+      GT-vs-V-JEPA side-by-side demo.
+- [ ] **Fixed-bundle rebuild:** cup + box objects (+ distractors) in `franka_build.py`;
+      `reach_with_object` task; `generate_task_bundles.py` scripted-expert bundle generator;
+      `--bundles` loader in the runner; 50 trials per (task, object) over
+      reach/grasp/reach_with_object/pick_place x cup/box (400 bundles).
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 

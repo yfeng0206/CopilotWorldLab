@@ -13,6 +13,38 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-05 -- Clean-slate reset + fixed-bundle, two-object benchmark redesign
+
+#### 18. Move from random-per-trial scenarios to fixed, saved task bundles (cup + box)
+**Context**: The closed-loop benchmark randomized the object/target every trial (`_rand_cube_xy`) and
+built goal images in memory, saving them only for a few visualized trials -- so scenarios were neither
+reproducible nor inspectable, and configs (samples, `W*`, fine-tune) could not be compared on
+identical setups. User directive: "these tests should be a scripted run and not random each time...
+there should be a folder of them, also good for me to inspect." Also: run the paper's task set on
+**cup and box** objects, not just a bare cube.
+**Investigation**: A `TaskBundle` schema already existed (`src/bench/schema.py`: saved
+start/goal/sub-goal PNGs + `arrays.npz` states + `model.xml` + `meta.json`) and was used by
+`render_robomimic_task.py`, but the benchmark runner bypassed it. robosuite ships ready-made object
+meshes (can, bottle, milk, cereal, bread, lemon + a cube) under
+`.venv/Lib/site-packages/robosuite/models/assets`, but the live control loop is our own
+`FrankaDroidEnv`, so robomimic/robosuite data is not needed -- only a geom swap in `franka_build.py`.
+**Decision / design**: (1) **Clean slate** -- removed the committed `results/` (benchmark reports,
+camera/energy ablations, cem_loop) and `archive/` scaffolding, and the untracked `outputs/` (energy
+landscape images) and old `tasks/` bundles; kept `logs/`. All committed removals recoverable from git
+history. (2) **Fixed bundles** -- a scripted expert generates each scenario once
+(`scripts/generate_task_bundles.py`) and the benchmark loads them (`--bundles`), replacing
+`_rand_cube_xy`. (3) **Two objects** -- rim-graspable **cup** (procedural thin-wall open cylinder) and
+a single rigid **box** block, on **one env** with the target geom swapped; static distractors for
+realism. (4) **Tasks & counts** -- the paper's four robot tasks (Reach / Grasp / Reach-with-object /
+Pick-Place; arXiv 2506.09985 Table 3) x 2 objects x 50 = 400 bundles; success = Euclidean delta within
+a swept sphere radius `x` (reach = EE-to-target; grasp = scripted close+lift; reach_with_object = held
+object to goal, never dropped; pick_place = object at final goal, released, 4/10/4). No robomimic
+dependency.
+**Outcome**: All design/plan/experiment docs updated to the new design (README, DESIGN, plan,
+experiments/README, benchmark_plan, closed_loop_success_plan, closed_loop_benchmark rewritten;
+historical docs bannered). Build in progress: env objects -> bundle generator -> `--bundles` loader ->
+runs.
+
 ### 2026-07-04 -- Closed-loop task-success benchmark: paper config + own honest env
 
 #### 17. Reproduce the paper's success-rate metric on our own MuJoCo env (not robosuite, not toy)

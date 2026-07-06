@@ -9,19 +9,22 @@ note: quantitative claims are verified against primary sources (see
 The through-line: reproduce V-JEPA 2-AC as a coarse latent world-model controller, benchmark it
 honestly, then improve manipulation by **fusing a third-person view with a first-person (wrist)
 view** -- first as a coarse-to-fine handoff, then as a learned cross-view latent, and finally as
-a single unified latent. We are currently on **Phase 0**. The technical flow for each phase is in
+a single unified latent. We are currently on **Phase 1**. The technical flow for each phase is in
 [`architecture.md`](architecture.md) (flowchart).
 
-- **Phase 0 -- Setup + reproduce (current).** Load V-JEPA 2-AC, set up the environment, and
+- **Phase 0 -- Setup + reproduce (done).** Load V-JEPA 2-AC, set up the environment, and
   verify the world model reproduces the paper: energy-landscape sanity, transition scoring on real
   DROID, and closed-loop CEM to goal images. Build our own honest MuJoCo grasp/place env
   (real physics + hidden success) since robosuite's runtime is Windows-blocked.
-- **Phase 1 -- Full benchmark + report.** Run the closed-loop task-success benchmark at scale and
-  write a full report. Axes: **model size** (ViT-g vs ViT-L*), **CEM population** (200 vs 400 vs
-  800 samples), planning horizon (T=1 vs T=2), and object/localization metrics (incl. bounding-box
-  based success -- exact metric TBD). Report success rate, planning efficiency, and energy
-  calibration. (*ViT-L has no released AC predictor; a size comparison needs a trained predictor
-  -- see the open question in [`vjepa2_ac_architecture.md`](vjepa2_ac_architecture.md) Section 6.)
+- **Phase 1 -- Fixed-bundle closed-loop benchmark (current).** Run the closed-loop task-success
+  benchmark on **fixed, saved task bundles** (reproducible, inspectable) over the paper's **four robot
+  tasks** (Reach / Grasp / Reach-with-object / Pick-Place; arXiv 2506.09985 Table 3) and **two
+  objects** (a rim-graspable **cup** and a rigid **box**) on the same env with the target geom
+  swapped, **50 trials per (task, object)** (400 bundles). Success is judged from hidden privileged
+  sim state as a Euclidean delta within a swept sphere radius `x` (mean delta + success@x). Ablation
+  axes: **CEM population** (200 vs 400 vs 800 samples) and, later, `W*` frame calibration and a
+  fine-tuned predictor -- each scored on the identical bundle set. See
+  [`experiments/closed_loop_benchmark.md`](experiments/closed_loop_benchmark.md).
 - **Phase 2 -- POV/wrist CNN coarse-to-fine (improvement #1).** Add a CNN backbone for the
   first-person **wrist** view. V-JEPA plans the coarse approach (third-person); when it stalls, a
   CNN-based classical image matcher/servo takes over for the fine, close-range motion. Flow:

@@ -2,6 +2,11 @@
 
 Date: 2026-07-04. Branch: world-model-pilot. GPU: RTX 3090 (bf16).
 
+> Status: historical pilot record. This is the early reach-only CEM proof that the env loop works; it
+> precedes and is superseded by the fixed-bundle task-success benchmark
+> ([closed_loop_benchmark.md](closed_loop_benchmark.md)). Any committed figures it references were
+> cleared in the 2026-07-05 reset (recoverable from git history).
+
 > Phase note (roadmap in [`../DESIGN.md`](../DESIGN.md#0-project-roadmap-phases)): this is the
 > **closed-loop reach pilot** that precedes the full Phase-1 task-success benchmark
 > ([`closed_loop_success_plan.md`](closed_loop_success_plan.md)). It shows the CEM env loop works;
