@@ -54,11 +54,13 @@ CUP_HALF_H = 0.035         # 7 cm tall
 CUP_SEGMENTS = 12          # wall box segments around the ring
 CUP_BOTTOM_HALF = 0.004    # bottom disk half-thickness
 
-# Per-object rest half-height (for placing the object resting on the table) and grasp style.
+# Per-object rest half-height (for placing the object resting on the table), grasp style, and the
+# grasp-point z offset from the object CENTER for the gripper TCP (EE_SITE): cube/box grasp top-down
+# at the body centre; the cup is grasped at the rim (near the top, one finger inside).
 OBJECT_SPECS = {
-    "cube": {"rest_half_z": CUBE_HALF, "grasp": "top"},
-    "box": {"rest_half_z": BOX_HALF[2], "grasp": "top"},
-    "cup": {"rest_half_z": CUP_HALF_H, "grasp": "rim"},
+    "cube": {"rest_half_z": CUBE_HALF, "grasp": "top", "grasp_dz": 0.005},
+    "box": {"rest_half_z": BOX_HALF[2], "grasp": "top", "grasp_dz": 0.0},
+    "cup": {"rest_half_z": CUP_HALF_H, "grasp": "rim", "grasp_dz": CUP_HALF_H - 0.010},
 }
 
 # Manipuland material: high tangential friction so the grip holds under static load; ~16-30 g so the

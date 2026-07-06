@@ -34,6 +34,7 @@ from src.envs.franka_build import (
     GRIPPER_ACTUATOR,
     GRIPPER_DRIVER_JOINT,
     GRIPPER_DRIVER_RANGE,
+    OBJECT_SPECS,
     PLACE_ZONE_BODY,
     PLACE_ZONE_CENTER,
     PLACE_ZONE_RADIUS,
@@ -71,6 +72,8 @@ class FrankaDroidEnv:
         ik_rot_fail_tol: float = IK_ROT_FAIL_TOL,
         add_object: bool = False,
         add_zone: bool = False,
+        object_type: str = "cube",
+        add_distractors: bool = False,
         seed: int = 0,
     ) -> None:
         import mujoco
@@ -78,7 +81,13 @@ class FrankaDroidEnv:
         self._mujoco = mujoco
         self.add_object = bool(add_object)
         self.add_zone = bool(add_zone)
-        _build_kwargs = dict(add_object=self.add_object, add_zone=self.add_zone)
+        self.object_type = str(object_type)
+        if self.object_type not in OBJECT_SPECS:
+            raise ValueError(f"unknown object_type '{object_type}' (expected {list(OBJECT_SPECS)})")
+        self.object_rest_half_z = float(OBJECT_SPECS[self.object_type]["rest_half_z"])
+        self.add_distractors = bool(add_distractors)
+        _build_kwargs = dict(add_object=self.add_object, add_zone=self.add_zone,
+                             object_type=self.object_type, add_distractors=self.add_distractors)
         self.model = (
             build_franka_robotiq(menagerie_dir, **_build_kwargs) if menagerie_dir
             else build_franka_robotiq(**_build_kwargs)
@@ -147,9 +156,9 @@ class FrankaDroidEnv:
         return self.get_observation()
 
     def _place_cube(self, cube_xy=None) -> None:
-        """Set the cube's free-joint pose to a resting start on the table (upright)."""
+        """Set the manipuland's free-joint pose to a resting start on the table (upright)."""
         x, y, _ = CUBE_START if cube_xy is None else (float(cube_xy[0]), float(cube_xy[1]), 0.0)
-        z = TABLE_TOP_Z + CUBE_HALF
+        z = TABLE_TOP_Z + self.object_rest_half_z
         self.data.qpos[self._cube_qadr:self._cube_qadr + 3] = [x, y, z]
         self.data.qpos[self._cube_qadr + 3:self._cube_qadr + 7] = [1.0, 0.0, 0.0, 0.0]
 
