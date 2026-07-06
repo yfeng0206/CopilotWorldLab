@@ -113,6 +113,7 @@ def _grasp_points(obj, c):
 def _base_arrays(env):
     return {
         "qpos0": env.data.qpos.copy(),
+        "qpos_start": env.data.qpos.copy(),
         "qvel0": env.data.qvel.copy(),
         "start_ee": env.get_ee_state().copy(),
         "object_pose": env.object_pose().copy(),
@@ -121,38 +122,14 @@ def _base_arrays(env):
 
 
 # --------------------------------------------------------------------------- per-task builders
-def build_grasp_and_reach(env, rng, obj):
-    """2-goal compositional task: V-JEPA grasps the object off the table (goal_1), then reaches with
-    it to a target (goal). Object starts on the table (unlike reach_with_object, which starts held)."""
-    env.reset(cube_xy=_sample_obj_xy(rng))
-    _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
-    start_img = env.render("planning")
-    arrays = _base_arrays(env)  # qpos0 = initial, object on the table
-    c = env.object_position()
-    approach, grasp = _grasp_points(obj, c)
-    arrays["grasp_pos"] = grasp.astype(float)
-    # goal_1: object just grabbed (gripper closed) at its location, on the table
-    _goto(env, approach)
-    _goto(env, grasp)
-    _goto(env, grasp, grip=1.0)
-    if not env.gripper_holds_object():
-        return None, None, None, False
-    goal_1 = env.capture_goal_image(pos=grasp, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                    held_object=True)
-    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for the reach
-    ee = env.get_ee_state()[:3]
-    # goal: reach with the held object to a far target (>= ~0.18 m)
-    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.18)
-    arrays["goal_ee"] = goal_ee.astype(float)
-    goal_g = env.capture_goal_image(pos=goal_ee, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                    held_object=True)
-    _goto(env, goal_ee, grip=1.0, n=10)  # validate the held reach
-    ok = bool(env.gripper_holds_object())
-    arrays["goal_object"] = env.object_position().copy()
-    return {"start": start_img, "goal_1": goal_1, "goal": goal_g}, arrays, {"start_grasped": False}, ok
-
+# Design: the scripted expert PHYSICALLY performs each stage and we render the LIVE state at each
+# checkpoint (env.render). We never teleport-carry the object into a goal pose -- so every goal image
+# is exactly what MuJoCo physics produces (object where it really is: on the table when just grabbed,
+# held when lifted), which is what makes success/failure measurable and the frames trustworthy.
 
 def build_grasp(env, rng, obj):
+    """V-JEPA plans ONLY the grasp reach. Goal = object JUST GRABBED (gripper closed on it, still on
+    the table, NOT lifted). A scripted lift afterward tests success (off table + not dropped)."""
     env.reset(cube_xy=_sample_obj_xy(rng))
     _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
     start_img = env.render("planning")
@@ -160,17 +137,14 @@ def build_grasp(env, rng, obj):
     c = env.object_position()
     approach, grasp = _grasp_points(obj, c)
     arrays["grasp_pos"] = grasp.astype(float)
-    # V-JEPA plans only the grasp reach; the goal shows the object JUST GRABBED (gripper closed) at
-    # its location, NOT lifted. The lift is scripted afterward -- success = off the table + not
-    # dropped. (V-JEPA doing the lift itself would be the reach_with_object task.)
     _goto(env, approach)
     _goto(env, grasp)
     _goto(env, grasp, grip=1.0)
     if not env.gripper_holds_object():
         return None, None, None, False
-    goal_img = env.capture_goal_image(pos=grasp, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                      held_object=True)    # just grabbed, still on the table
-    arrays["goal_object"] = env.object_position().copy()   # object at the grabbed pose (not lifted)
+    goal_img = env.render("planning")                      # LIVE: object on the table, gripped
+    arrays["qpos_goal"] = env.data.qpos.copy()
+    arrays["goal_object"] = env.object_position().copy()
     # validate the grasp is liftable: scripted lift, off the table, not dropped
     z0 = env.object_position()[2]
     _goto(env, grasp + np.array([0.0, 0.0, 0.14]), grip=1.0)
@@ -179,10 +153,10 @@ def build_grasp(env, rng, obj):
 
 
 def build_reach_with_object(env, rng, obj):
+    """Object STARTS grasped + lifted; V-JEPA moves the held object to a goal (paper-like traverse)."""
     env.reset(cube_xy=_sample_obj_xy(rng))
     c = env.object_position()
     approach, grasp = _grasp_points(obj, c)
-    # scripted grasp then lift to a start hover above the grasp point -- object STARTS grasped
     _goto(env, approach)
     _goto(env, grasp)
     _goto(env, grasp, grip=1.0)
@@ -190,21 +164,55 @@ def build_reach_with_object(env, rng, obj):
     _goto(env, start_hover, grip=1.0)
     if not env.gripper_holds_object():
         return None, None, None, False
-    start_img = env.render("planning")
+    start_img = env.render("planning")                     # LIVE: object held, lifted at the start
     arrays = _base_arrays(env)  # qpos0 = grasped, object-in-hand state
     ee = env.get_ee_state()[:3]
-    # goal: a large, paper-like traverse across the table while holding (>= ~0.20 m)
     goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.20)
     arrays["goal_ee"] = goal_ee.astype(float)
-    goal_img = env.capture_goal_image(pos=goal_ee, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                      held_object=True)
-    _goto(env, goal_ee, grip=1.0, n=10)  # validate the held traverse
-    ok = bool(env.gripper_holds_object())
-    arrays["goal_object"] = env.object_pose()[:3].copy()
+    _goto(env, goal_ee, grip=1.0, n=10)                    # physically move while holding
+    if not env.gripper_holds_object():
+        return None, None, None, False                     # dropped -> invalid
+    goal_img = env.render("planning")                      # LIVE: object at goal, held
+    arrays["qpos_goal"] = env.data.qpos.copy()
+    ok = True
+    arrays["goal_object"] = env.object_position().copy()
     return {"start": start_img, "goal": goal_img}, arrays, {"start_grasped": True}, ok
 
 
+def build_grasp_and_reach(env, rng, obj):
+    """2-goal compositional task: V-JEPA grasps the object off the table (goal_1 = just grabbed), then
+    reaches with the held object to a target (goal). Object starts ON THE TABLE (V-JEPA does both)."""
+    env.reset(cube_xy=_sample_obj_xy(rng))
+    _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
+    start_img = env.render("planning")
+    arrays = _base_arrays(env)  # qpos0 = initial, object on the table
+    c = env.object_position()
+    approach, grasp = _grasp_points(obj, c)
+    arrays["grasp_pos"] = grasp.astype(float)
+    _goto(env, approach)
+    _goto(env, grasp)
+    _goto(env, grasp, grip=1.0)
+    if not env.gripper_holds_object():
+        return None, None, None, False
+    goal_1 = env.render("planning")                        # LIVE: just grabbed, on the table
+    arrays["qpos_goal_1"] = env.data.qpos.copy()
+    _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for the reach
+    ee = env.get_ee_state()[:3]
+    goal_ee = _far_pose(rng, ee, lo=[0.40, 0.04, 0.30], hi=[0.60, 0.24, 0.46], min_sep=0.18)
+    arrays["goal_ee"] = goal_ee.astype(float)
+    _goto(env, goal_ee, grip=1.0, n=10)                    # physically reach while holding
+    if not env.gripper_holds_object():
+        return None, None, None, False
+    goal_g = env.render("planning")                        # LIVE: held object at the target
+    arrays["qpos_goal"] = env.data.qpos.copy()
+    ok = True
+    arrays["goal_object"] = env.object_position().copy()
+    return {"start": start_img, "goal_1": goal_1, "goal": goal_g}, arrays, {"start_grasped": False}, ok
+
+
 def build_pick_place(env, rng, obj):
+    """grasp -> vicinity -> place, fixed 4/10/4. goal_1 = just grabbed (on table), goal_2 = held in
+    the vicinity of the zone, goal = object PLACED in the zone (released, gripper away)."""
     env.reset(cube_xy=_sample_obj_xy(rng))
     _goto(env, _random_start_ee(rng), n=8)  # randomized starting pose
     start_img = env.render("planning")
@@ -214,36 +222,33 @@ def build_pick_place(env, rng, obj):
     zone = env.zone_center()
     approach, grasp = _grasp_points(obj, c)
     arrays["grasp_pos"] = grasp.astype(float)
-    # scripted grasp FIRST; sub-goal 1 = object JUST GRABBED at its location (not lifted),
-    # 2 = held in the vicinity, 3 = placed -- all the same grasp, differing only in location.
     _goto(env, approach)
     _goto(env, grasp)
     _goto(env, grasp, grip=1.0)
     if not env.gripper_holds_object():
         return None, None, None, False
-    goal_1 = env.capture_goal_image(pos=grasp, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                    held_object=True)   # just grabbed, still on the table (not lifted)
+    goal_1 = env.render("planning")                        # LIVE: just grabbed, on the table
+    arrays["qpos_goal_1"] = env.data.qpos.copy()
     _goto(env, grasp + np.array([0.0, 0.0, 0.12]), grip=1.0)  # lift for transport
     # the object hangs off the TCP by the grasp offset (rim grasp); shift the transport targets by
     # that hold offset so the OBJECT -- not the gripper -- ends over the zone.
     hold_off = env.get_ee_state()[:3] - env.object_position()
     vicinity_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.12])
-    place_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.04])
+    place_pos = np.array([zone[0] + hold_off[0], zone[1] + hold_off[1], TABLE_TOP_Z + half + 0.03])
     arrays["vicinity_pos"] = vicinity_pos.astype(float)
     arrays["place_pos"] = place_pos.astype(float)
-    goal_2 = env.capture_goal_image(pos=vicinity_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                    held_object=True)
-    goal_g = env.capture_goal_image(pos=place_pos, euler=EE_DOWN, gripper=1.0, camera="planning",
-                                    held_object=True)
-    # validate the full place
     _goto(env, vicinity_pos, grip=1.0)
+    goal_2 = env.render("planning")                        # LIVE: held in the vicinity of the zone
+    arrays["qpos_goal_2"] = env.data.qpos.copy()
     _goto(env, place_pos, grip=1.0)
-    _goto(env, place_pos, grip=-1.0)
+    _goto(env, place_pos, grip=-1.0)                       # release
     for _ in range(2):
-        _goto(env, place_pos + np.array([0, 0, 0.10]), n=3)
+        _goto(env, place_pos + np.array([0, 0, 0.12]), n=3)  # retract the arm away
+    goal_g = env.render("planning")                        # LIVE: object placed in the zone
+    arrays["qpos_goal"] = env.data.qpos.copy()
     err = float(np.linalg.norm(env.object_position()[:2] - zone[:2]))
     ok = err < 0.06
-    arrays["goal_object"] = np.array([zone[0], zone[1], TABLE_TOP_Z + half])
+    arrays["goal_object"] = env.object_position().copy()
     return {"start": start_img, "goal_1": goal_1, "goal_2": goal_2, "goal": goal_g}, arrays, \
         {"start_grasped": False}, ok
 

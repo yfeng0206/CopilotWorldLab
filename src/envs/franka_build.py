@@ -69,11 +69,13 @@ _OBJ_FRICTION = [2.0, 0.1, 0.01]
 _OBJ_DENSITY = 250.0
 
 # Static distractor clutter for visual realism (paper's cluttered table, Fig. 14). Visual-only
-# (contype/conaffinity 0) and outside the reachable workspace, so they never affect physics.
+# (contype/conaffinity 0) and outside the reachable workspace, so they never affect physics. Colors
+# are chosen distinct from the manipulands (cup=pink, box=blue) and the place zone (green) so no two
+# objects in a scene share a color.
 DISTRACTORS = (
-    ("distractor_box", "box", (0.72, -0.30, 0.24), (0.04, 0.03, 0.04), (0.25, 0.35, 0.80, 1.0)),
     ("distractor_can", "cylinder", (0.73, 0.30, 0.25), (0.03, 0.05, 0.0), (0.85, 0.45, 0.20, 1.0)),
-    ("distractor_ball", "sphere", (0.30, 0.34, 0.25), (0.035, 0.0, 0.0), (0.55, 0.30, 0.65, 1.0)),
+    ("distractor_ball", "sphere", (0.30, 0.34, 0.25), (0.035, 0.0, 0.0), (0.60, 0.25, 0.70, 1.0)),
+    ("distractor_prism", "cylinder", (0.72, -0.30, 0.25), (0.028, 0.05, 0.0), (0.90, 0.75, 0.10, 1.0)),
 )
 
 PLACE_ZONE_BODY = "place_zone"
