@@ -198,3 +198,62 @@ not sneak back in.
      lift, move to goal, open -- our own simple pick/place loop.
   Only move to robosuite/ManiSkill *rollout* (WSL2/Linux) if closed-loop success on an official
   suite is required. Do not fight their Windows runtimes.
+
+## Fixed task-bundle generation (scripted expert -> goal images)
+
+### 20. Goal images must be the LIVE physics state, not a teleport-carry
+- **What happens**: rendering a "just grabbed" goal with `capture_goal_image(held_object=True)`
+  showed the object lifted/tilted off the table even though physics had it resting -- the carry
+  logic teleports the object *up with the gripper*.
+- **Rule**: for on-table checkpoints (start, "just grabbed" goals) render the LIVE state
+  (`env.render`) after the scripted expert physically performs the step. Only use a kinematic carry
+  for genuinely *held* checkpoints (see #22), and build the placed goal directly (#23).
+
+### 21. A position-only scripted move leaves the gripper tilted; command the orientation
+- **What happens**: grasping via position-only `_goto` (apply_action with zero rotation delta) let
+  the gripper drift 15-25 deg off straight-down. The tilted gripper dipped into the cup and, when a
+  held object was carried, reproduced that tilt as object tilt.
+- **Root cause**: `apply_action` keeps the *current* EE orientation; nothing ever commands
+  straight-down, so it inherits whatever the random start pose drifted to.
+- **Rule**: for a deterministic grasp, command the orientation explicitly with
+  `set_ee_pose(euler=EE_DOWN)` at a FIXED offset from the object, then close. The grip is then
+  identical *relative to the object* at any table xy (ee_tilt ~1.3 deg everywhere). This is the
+  "gripper relative to the object" invariant.
+
+### 22. Carry held objects kinematically + force upright; physical transport swings a one-wall grip
+- **What happens**: physically dragging a cup gripped by ONE wall's rim swings/tilts it to 20-50 deg
+  (dynamic torque about the single grip line). Even a kinematic carry that preserves the
+  gripper-relative pose stays tilted, because the arm's IK leaves a ~15 deg residual off straight-down.
+- **Rule**: build held sub-goal images with `env.move_held_to(..., upright=True)` -- carry the object
+  with the gripper but force it vertical (keep yaw, drop pitch/roll). Held-goal object tilt ~0.
+
+### 23. A physical one-wall-rim RELEASE is unreliable; construct the placed goal directly
+- **What happens**: opening a one-wall rim grip hooks the inside finger on the cup, so "open + retract"
+  lifted the cup instead of releasing it. Also the atomic IK-fail guard (#17-adjacent) rejected an
+  over-long straight-up retract, freezing the arm with the fingers still on the object.
+- **Rule**: build the placed goal as the intended target state -- `env.place_object(zone_xy)` settles
+  the object upright on the table in the zone, then set the arm just above with the gripper open. Verify
+  it is a valid rest (object at rest height, tilt 0, released). Success is scored on the object
+  landing + release, not on a flaky physical release rollout.
+
+### 24. Cap scripted `_goto` step size so the atomic IK-fail guard never freezes the arm
+- **What happens**: `apply_action` is atomic -- if the (clamped 0.13 m) move lands outside the IK
+  tolerance, the whole move is rejected and the arm does not budge. A long retract at a far/low reach
+  hit this and silently froze.
+- **Rule**: `_goto` caps each step to a small translation (~0.05 m) and loops; small steps keep the
+  IK inside tolerance so long moves are reliable (offline generation, so extra steps are free).
+
+### 25. No two objects in a scene may share a colour; grip near the rim, not inside
+- **What happens**: the blue distractor box matched the blue box manipuland ("two blue cubes"); and a
+  cup grasp point set too low made the gripper appear to plunge into the cup.
+- **Rule**: give every object a distinct colour (manipulands cup=pink / box=blue, zone=green,
+  distractors orange/purple/yellow). Set the cup grasp height near the rim opening (grasp_dz ~ rim -
+  4 mm) so the fingers grip the top edge, not the interior.
+
+### 26. Show the user real MuJoCo renders and get sign-off before mass-regenerating
+- **What happens**: several rounds of subtle bundle bugs (lifted objects, wrong grasp, colour clashes)
+  were only caught after committing 400 bundles.
+- **Rule**: generate one bundle per (object, task) and open the interactive viewer
+  (`scripts/inspect_task_viewer.py`, N/B to step stages -- SPACE is reserved by the MuJoCo viewer for
+  pause) for the user to inspect and approve BEFORE regenerating the full set. bf16/GL teardown can
+  exit with 0xC0000005 on window close -- cosmetic, ignore it.
