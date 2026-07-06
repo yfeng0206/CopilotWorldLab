@@ -49,6 +49,33 @@ consistent with our V-JEPA-does-spatial / scripted-does-gripper decomposition. O
 grasp** (pregrasp→grasp) is *our* addition, not the paper's single-goal grasp, so it is reported
 only as a labeled ablation (`--protocol multistage`).
 
+## How a test runs, and every hyperparameter
+
+![benchmark flowchart](../../results/benchmarks/closed_loop_smoke/benchmark_flowchart.png)
+
+The benchmark is a set of nested loops:
+**BENCHMARK > TRIAL > TASK (stages) > MPC time-step (x the 4/10/4 counts) > CEM (10 iters x 200
+samples x T=2 rollout)**. Regenerate the diagram with `python scripts/make_benchmark_flowchart.py`.
+
+| hyperparameter | value | what it does |
+|---|---|---|
+| **trials** | 50 (paper 10; retry 75) | randomized episodes per task; more = tighter success-rate estimate |
+| **seed** | 0 | fixes the cube/target placement and CEM sampling for reproducibility |
+| **sub-goal schedule** | reach 5; grasp 6; pick_place **4/10/4** | number of MPC time-steps spent driving toward each goal image; 4/10/4 = the paper's grasp->vicinity->place budget (3 goals) |
+| **MPC time-step** | (the counts above) | one closed-loop cycle: observe image+EE state -> plan an action with CEM -> execute only the 1st action (receding horizon) -> re-observe |
+| **rollout / T** | 2 | planning horizon -- how many future frames the world model predicts per candidate action-trajectory (T=2 = 2 steps ahead). Paper text sometimes says 1; released code = 2 |
+| **samples** | 200 / 400 / 800 | # of candidate action-trajectories CEM draws per iteration; more = better search, more VRAM/time |
+| **cem_steps** | 10 | # of CEM refinement iterations per MPC step (sample -> score -> keep topk -> re-sample) |
+| **topk** | 10 | # of best candidates kept each CEM iteration to update the sampling mean/std |
+| **maxnorm** | 0.05 (paper-text 0.075) | per-axis action clip in metres (max EE move/axis/step); also the initial sampling std |
+| **momentum_mean / std** | 0.15 / 0.15 | how much the CEM distribution carries over between iterations (smoothing) |
+| **pos_tol** | 0.015 | early-stop a reach/grasp stage when the EE is within 1.5 cm (pick_place stages run fixed steps, no early-stop) |
+| **chunk** | 400 | predictor sub-batch size over the sample dimension -- caps peak VRAM (mathematically identical) |
+| **dtype** | bf16 | model forward precision |
+| **objective** | mean-L1 in layer-norm'd latent | CEM scores each candidate by the L1 distance between its predicted final latent and the goal latent |
+| **gripper** | frozen axis | V-JEPA plans only the arm; the gripper (close/lift/open) is scripted at stage transitions |
+| **model** | ViT-g encoder (1.01B) + AC predictor (305M) | frozen V-JEPA 2; image 256x256 -> 256 tokens/frame |
+
 ## Success criteria (hidden state)
 
 A trial succeeds at precision threshold `τ` iff `error < τ` **AND** all physical gates hold:
