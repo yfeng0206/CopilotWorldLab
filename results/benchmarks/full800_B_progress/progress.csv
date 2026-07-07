@@ -1,2 +1,3 @@
 task_object,n,success_loose_pct,mean_err_cm
+grasp/box,4,0.0,4.5
 grasp/cup,50,40.0,6.58
