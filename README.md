@@ -26,6 +26,10 @@ The full roadmap is in [`docs/DESIGN.md`](docs/DESIGN.md#0-project-roadmap-phase
 Reproducible experiments with honest, primary-source-verified numbers (see
 [`docs/experiments/`](docs/experiments)):
 
+- **Demo reel** — labeled HIT/MISS rollout GIFs (grasp + reach-with-object, cup/box) with the
+  paper's greedy-MPC explanation: [`results/demos/full800_B/`](results/demos/full800_B). reach-with-
+  object **98% / 94%** beats the paper's 75%.
+
 - **Energy-landscape reproduction** (correctness gate): the model reproduces the paper's behaviour
   — latent-energy minimum near the ground-truth action (reverse cos **+0.98**), reverse flips.
 - **Camera-placement ablation**: the horizontal action frame is view-relative; the best zero-shot

@@ -99,6 +99,7 @@ def render_demo(run_dir, task, obj, trial, outcome, final_err_cm, failure, out_g
                      if r["task"] == lab and int(r["trial"]) == trial)
     steps = [r for r in csv.DictReader(open(os.path.join(run_dir, "steps.csv")))
              if r["task"] == lab and int(r["trial"]) == trial]
+    total_plan = sum(1 for r in steps if r["phase"].startswith("vjepa"))  # V-JEPA planning steps
 
     bdir = os.path.join(_REPO_ROOT, "tasks", task, obj, bundle_id)
     arr = dict(np.load(os.path.join(bdir, "arrays.npz")))
@@ -110,12 +111,23 @@ def render_demo(run_dir, task, obj, trial, outcome, final_err_cm, failure, out_g
     ok = outcome == "HIT"
     banner = f"{lab}  -  {outcome}"
     frames = []
+    ctr = {"plan": 0, "settle": 0}
 
     def cap(phase, grip_cmd):
+        # per-frame step label: V-JEPA planning steps counted k/N; scripted primitives named
+        if phase.startswith("vjepa"):
+            ctr["plan"] += 1
+            steplab = f"V-JEPA plan {ctr['plan']}/{total_plan}"
+        else:
+            if phase == "settle":                      # subsample the long settle for a snappy GIF
+                ctr["settle"] += 1
+                if ctr["settle"] % 3 != 1:
+                    return
+            steplab = f"scripted: {phase}"
         rgb = env.render(camera="planning")
         held = "yes" if env.gripper_holds_object() else "no"
         tilt = np.degrees(env.object_tilt())
-        cap_txt = f"{phase}  |  held={held}  tilt={tilt:.0f}deg  |  final err={final_err_cm:.1f}cm"
+        cap_txt = f"{steplab}  |  held={held}  tilt={tilt:.0f}deg  |  final err={final_err_cm:.1f}cm"
         if not ok and failure:
             cap_txt += f"  ({failure})"
         frames.append(_label_frame(rgb, banner, cap_txt, ok))
@@ -161,14 +173,18 @@ def render_demo(run_dir, task, obj, trial, outcome, final_err_cm, failure, out_g
 def main():
     groups = [("grasp", "cup"), ("grasp", "box"),
               ("reach_with_object", "cup"), ("reach_with_object", "box")]
+    # pin specific trials for a clearer demo where the auto-pick is not the most illustrative
+    pin = {("reach_with_object", "box", "MISS"): 18}
     out_dir = os.path.join(_REPO_ROOT, "results", "demos", "full800_B")
     for task, obj in groups:
         run_dir, rows = _find_group(task, obj)
         if not rows:
             print(f"  {task}/{obj}: no data yet, skipping")
             continue
+        by_trial = {int(r["trial"]): r for r in rows}
         for want_hit, outcome in [(True, "HIT"), (False, "MISS")]:
-            r = _pick(rows, want_hit)
+            pinned = pin.get((task, obj, outcome))
+            r = by_trial.get(pinned) if pinned is not None else _pick(rows, want_hit)
             if not r:
                 print(f"  {task}/{obj}: no {outcome} example, skipping")
                 continue
