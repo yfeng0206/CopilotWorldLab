@@ -1002,7 +1002,7 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         gates = {"held": held, "upright": float(np.degrees(env.object_tilt())) < 30.0}
         target = arr["goal_ee"]
 
-    else:  # pick_place -- 3 sub-goals on the fixed 4 / 10 / 4 schedule
+    elif task == "pick_place":  # 3 sub-goals on the fixed 4 / 10 / 4 schedule
         run_vjepa_stages(env, ctx, tlog,
                          [stg("vjepa_pnp_grasp", "goal_1", "grasp_pos", args.pnp_grasp_steps, True)], args)
         scripted(env, tlog, "close", None, gripper=1.0)
@@ -1017,6 +1017,20 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         obj = env.object_position()
         error = float(np.linalg.norm(obj[:2] - env.zone_center()))
         gates = {"grasped": grasped, "upright": float(np.degrees(env.object_tilt())) < 25.0,
+                 "stable": float(env.object_speed()) < 0.05, "released": bool(env.object_placed())}
+        target = arr["place_pos"]
+
+    else:  # place_with_object -- object starts HELD; place half of pick_place (vicinity -> place)
+        run_vjepa_stages(env, ctx, tlog, [
+            stg("vjepa_pwo_vicinity", "goal_1", "vicinity_pos", args.pnp_vicinity_steps, True),
+            stg("vjepa_pwo_place", "goal", "place_pos", args.pnp_place_steps, True)], args)
+        cur = env.get_ee_state()[:3]
+        scripted(env, tlog, "lower", [cur[0], cur[1], TABLE_TOP_Z + 0.05])
+        scripted(env, tlog, "open", None, gripper=-1.0)
+        scripted(env, tlog, "settle", None, settle=30)
+        obj = env.object_position()
+        error = float(np.linalg.norm(obj[:2] - env.zone_center()))
+        gates = {"upright": float(np.degrees(env.object_tilt())) < 25.0,
                  "stable": float(env.object_speed()) < 0.05, "released": bool(env.object_placed())}
         target = arr["place_pos"]
 

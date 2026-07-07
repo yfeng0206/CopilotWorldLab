@@ -28,6 +28,7 @@ curve).
 | **reach_with_object** | object **starts already grasped** in `start.png`; plans the held object to a far goal location | gripper stays closed | `‖object_final − goal_object‖` |
 | **grasp_and_reach** | object starts on the table; plans to `goal_1` (just grabbed), then to `goal` with the held object at the target | close at `goal_1`; gripper stays closed | `‖object_final − goal_object‖` |
 | **pick_place** | grasp reach → vicinity → place across 3 goals on the fixed 4/10/4 schedule | close after `goal_1`; open after final goal | `‖object_final − zone_center‖` |
+| **place_with_object** | object **starts already grasped/lifted** in `start.png` (the place half of pick_place); plans to `goal_1` (held in the vicinity of the zone) then `goal` (placed) on a 10/4 schedule | open after the final goal | `‖object_final − zone_center‖` |
 
 Every task records a **continuous Euclidean error (delta)** to its goal and is scored at a **swept
 sphere radius `x`** (we report the mean delta and the success rate at several `x`, from tight to

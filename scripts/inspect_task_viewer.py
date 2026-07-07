@@ -26,7 +26,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-TASK_ORDER = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
+TASK_ORDER = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place", "place_with_object"]
 STAGE_KEYS = ["qpos_start", "qpos_goal_1", "qpos_goal_2", "qpos_goal"]
 KEY_NEXT = ord("N")      # 'N' = next stage (SPACE is reserved by the viewer for pause)
 KEY_PREV = ord("B")      # 'B' = previous stage
@@ -75,7 +75,7 @@ def main():
         raise SystemExit(f"no stages found under {args.tasks_dir} for object={args.object} "
                          f"(generate bundles first)")
 
-    idx = {"i": 0}
+    idx = {"i": 0, "last": -1}
 
     def apply(i):
         label, qpos = stages[i]
@@ -84,23 +84,25 @@ def main():
         mujoco.mj_forward(model, data)
         print(f"[{i + 1}/{len(stages)}]  {label}", flush=True)
 
+    # Thread-safety: key_callback runs on the viewer INPUT thread, so it must NOT touch model/data
+    # (concurrent mj_forward from two threads is a native crash, 0xC0000005). It only sets the target
+    # index; the MAIN loop applies qpos + mj_forward, serializing all state access.
     def key_callback(keycode):
         if keycode in (KEY_NEXT, KEY_RIGHT):
             idx["i"] = (idx["i"] + 1) % len(stages)
-            apply(idx["i"])
         elif keycode in (KEY_PREV, KEY_LEFT):
             idx["i"] = (idx["i"] - 1) % len(stages)
-            apply(idx["i"])
 
     print(f"=== inspecting object={args.object}: {len(stages)} stages ===")
     print("N = next stage, B = previous stage (or right/left arrow), mouse = orbit/zoom, "
           "close window = quit")
-    apply(0)
     with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
         while viewer.is_running():
-            mujoco.mj_forward(model, data)   # hold the stage frozen (no physics step)
+            if idx["i"] != idx["last"]:          # apply only on the MAIN thread (no race)
+                apply(idx["i"])
+                idx["last"] = idx["i"]
             viewer.sync()
-            time.sleep(0.03)
+            time.sleep(0.02)
 
 
 if __name__ == "__main__":

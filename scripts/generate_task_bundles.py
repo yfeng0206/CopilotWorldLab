@@ -51,7 +51,7 @@ from src.utils.logging import get_logger  # noqa: E402
 logger = get_logger("generate_task_bundles")
 
 EE_DOWN = [np.pi, 0.0, 0.0]  # gripper pointing down (extrinsic XYZ euler), matches the benchmark
-ALL_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
+ALL_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place", "place_with_object"]
 ALL_OBJECTS = ["cup", "box"]
 
 # Precision sphere-radius sweep per task (metres). SINGLE SOURCE OF TRUTH is
@@ -278,11 +278,56 @@ def build_pick_place(env, rng, obj):
         {"start_grasped": False}, ok
 
 
+def build_place_with_object(env, rng, obj):
+    """Object STARTS grasped + lifted (like reach_with_object); V-JEPA carries it over the zone and
+    places it DOWN. The place half of pick_place. goal_1 = held in the vicinity of the zone,
+    goal = object PLACED in the zone (released, gripper away). start_grasped=True."""
+    env.reset(cube_xy=_sample_obj_xy(rng))
+    env.set_zone_xy(*_sample_zone_xy(rng))  # randomized place zone (varies the place goal per trial)
+    half = OBJECT_SPECS[obj]["rest_half_z"]
+    zone = env.zone_center()
+    grasp, held = _grasp_object(env, obj)          # deterministic straight-down rim grasp
+    if not held:
+        return None, None, None, False
+    # start: kinematically carry the held (upright) object to a start hover over its pickup spot
+    start_hover = np.array([grasp[0], grasp[1], TABLE_TOP_Z + half + 0.16])
+    env.move_held_to(pos=start_hover, euler=EE_DOWN, gripper=1.0, upright=True)
+    start_img = env.render("planning")                     # object held upright, lifted at the start
+    arrays = _base_arrays(env)  # qpos0 = grasped, object-in-hand state
+    # goal_1: kinematically carry the held (upright) object to just above the zone -- no transport tilt
+    ox, oy = OBJECT_SPECS[obj]["grasp_off"]
+    dz = OBJECT_SPECS[obj]["grasp_dz"]
+    vicinity_pos = np.array([zone[0] + ox, zone[1] + oy, TABLE_TOP_Z + half + 0.05 + dz])
+    env.move_held_to(pos=vicinity_pos, euler=EE_DOWN, gripper=1.0, upright=True)
+    arrays["vicinity_pos"] = vicinity_pos.astype(float)
+    goal_1 = env.render("planning")                        # held upright in the vicinity of the zone
+    arrays["qpos_goal_1"] = env.data.qpos.copy()
+    # placed goal, constructed directly (a physical one-wall-rim release is too flaky): arm just above
+    # the placed object with the gripper open, object resting upright IN the zone.
+    env.set_ee_pose(pos=[zone[0], zone[1], TABLE_TOP_Z + half + 0.10], euler=EE_DOWN, gripper=0.0)
+    for _ in range(4):
+        env.apply_action(np.array([0., 0., 0., 0., 0., 0., -1.0]))  # open the fingers, hold the pose
+    env.place_object(zone[0], zone[1])                     # object settles upright in the zone
+    place_pos = np.array([zone[0], zone[1], TABLE_TOP_Z + half])
+    arrays["place_pos"] = place_pos.astype(float)
+    goal_g = env.render("planning")                        # LIVE: object placed in the zone, arm clear
+    arrays["qpos_goal"] = env.data.qpos.copy()
+    obj_final = env.object_position()
+    err = float(np.linalg.norm(obj_final[:2] - zone[:2]))
+    on_table = (obj_final[2] - (TABLE_TOP_Z + half)) < 0.02
+    upright = np.degrees(env.object_tilt()) < 20.0
+    ok = err < 0.06 and env.object_released() and on_table and upright
+    arrays["goal_object"] = obj_final.copy()
+    return {"start": start_img, "goal_1": goal_1, "goal": goal_g}, arrays, \
+        {"start_grasped": True}, ok
+
+
 BUILDERS = {
     "grasp": build_grasp,
     "reach_with_object": build_reach_with_object,
     "grasp_and_reach": build_grasp_and_reach,
     "pick_place": build_pick_place,
+    "place_with_object": build_place_with_object,
 }
 
 
@@ -359,7 +404,7 @@ def main():
 
 def hash_offset(task):
     """Stable per-task seed offset (not Python's randomized string hash)."""
-    return {"grasp": 0, "reach_with_object": 1, "grasp_and_reach": 2, "pick_place": 3}[task]
+    return {t: i for i, t in enumerate(ALL_TASKS)}[task]
 
 
 if __name__ == "__main__":

@@ -108,8 +108,10 @@ _BUNDLE_FAILURE_ORDER = {
     "grasp_and_reach": [("held", "dropped"), ("upright", "tipped")],
     "pick_place": [("grasped", "grasp_failed"), ("released", "not_released"),
                    ("upright", "tipped"), ("stable", "unstable")],
+    "place_with_object": [("released", "not_released"), ("upright", "tipped"),
+                          ("stable", "unstable")],
 }
-_BUNDLE_OFF_GOAL = {"pick_place": "outside_zone"}  # default: "off_goal"
+_BUNDLE_OFF_GOAL = {"pick_place": "outside_zone", "place_with_object": "outside_zone"}  # default: "off_goal"
 
 
 def bundle_classify(task: str, error: float, gates: dict, thresholds) -> tuple[bool, str]:

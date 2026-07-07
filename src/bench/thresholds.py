@@ -19,6 +19,7 @@ THRESHOLDS = {
     "grasp": [0.06, 0.03, 0.02],
     "reach_with_object": [0.10, 0.06, 0.03, 0.015],
     "grasp_and_reach": [0.10, 0.06, 0.03, 0.015],
+    "place_with_object": [0.10, 0.06, 0.03, 0.015],
 }
 
 # The physical gates that must ALSO hold (beyond the precision threshold) for a real success.
@@ -32,6 +33,8 @@ GATE_SPEC = {
     "grasp": ["lifted", "held", "upright", "stable"],
     "reach_with_object": ["held", "upright"],
     "grasp_and_reach": ["held", "upright"],
+    # place-with-object starts already grasped, so no ``grasped`` gate; success = placed + released
+    "place_with_object": ["upright", "stable", "released"],
 }
 
 
@@ -44,7 +47,7 @@ def success_at(error: float, gates: dict, thr: float) -> bool:
 # ``pick_place`` deliberately appears in BOTH: it has a legacy random-scenario implementation and a
 # fixed-bundle implementation.
 LEGACY_TASKS = ["reach", "grasp_lift", "place", "pick_place"]
-BUNDLE_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place"]
+BUNDLE_TASKS = ["grasp", "reach_with_object", "grasp_and_reach", "pick_place", "place_with_object"]
 
 
 def validate_task_mode(tasks, bundles, legacy=LEGACY_TASKS, bundle_tasks=BUNDLE_TASKS):
