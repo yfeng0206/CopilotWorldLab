@@ -257,3 +257,27 @@ not sneak back in.
   (`scripts/inspect_task_viewer.py`, N/B to step stages -- SPACE is reserved by the MuJoCo viewer for
   pause) for the user to inspect and approve BEFORE regenerating the full set. bf16/GL teardown can
   exit with 0xC0000005 on window close -- cosmetic, ignore it.
+
+### 27. MuJoCo passive-viewer key_callback must not touch model/data (native crash)
+- **What happens**: an interactive replay viewer crashed at a random frame with no Python traceback
+  (native 0xC0000005). The `key_callback` runs on the viewer's INPUT thread; it called
+  `mj_forward` on the same `data` the main render loop was updating -> concurrent MuJoCo state
+  access from two threads.
+- **Rule**: the key_callback only mutates a shared index; the MAIN loop applies qpos + `mj_forward`.
+  See `scripts/replay_rollout_viewer.py`. (`inspect_task_viewer.py` has the same latent race.)
+
+### 28. Gripper-freeze and object salience are NOT the grasp bottleneck; sim close/lift mechanics are
+- **What we tested**: (a) frozen vs CEM-planned gripper (`--plan-gripper`), (b) planning camera
+  A_current vs B_closer (~2x object pixels, same angle) vs C_droidlike, on grasp + reach_with_object,
+  n=5, samples 200.
+- **Findings**: (a) planned gripper was no better than frozen (grasp ~20% either way). (b) B doubled
+  object pixels but grasp stayed 20% cup / 0% box; the EE already lands ~3.4 cm XY from the box grasp
+  target with `held=0` -- the arm reaches, the scripted rim/box close-and-lift misses. B *did* help
+  fine positioning (reach_with_object/box @6cm 40%->80%, cup eeZ 3.0->1.5cm, cup grasp held%
+  20->40%). (c) C_droidlike collapsed (errors 25-49 cm) -- an azimuth change breaks the action frame
+  and we apply NO W* correction, so the planner moves the wrong way. Salience was not a confound; the
+  action frame was.
+- **Rule**: when changing the planning camera, keep the az/el of the validated view (only move
+  distance) unless you also fit and apply the W* action-frame rotation. Re-render goal images from
+  saved `qpos_goal*` so obs and goal share the viewpoint (never compare a new-camera obs to an old
+  goal PNG). To lift grasp success, fix the sim grasp mechanics / success criteria, not the camera.

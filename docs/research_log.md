@@ -13,6 +13,27 @@ or decision, and outcomes. New entries are appended at the top of each section.
 
 ## Session Log
 
+### 2026-07-06 -- Camera-salience experiment (does a better view fix grasp?)
+
+#### 21. Grasp bottleneck is sim grasp mechanics, not camera salience or gripper freeze
+**Hypothesis**: the validated planning camera (az45_el45) was chosen for one-step action-direction
+alignment, not contact salience; a closer/DROID-like view might let the frozen encoder see rim
+contact and grasp more precisely.
+**Method**: added a camera override (`--planning-camera`) that re-renders goal images from saved
+qpos so obs and goal share the view; a static salience probe (object/gripper pixel area); and a
+metrics analyzer (EE-to-target XY/Z, held%, energy, planned dxyz). Ran grasp + reach_with_object,
+cup+box, n=5, samples 200, maxnorm 0.05, across A_current / B_closer / C_droidlike. Also A/B tested
+frozen vs CEM-planned gripper.
+**Result**: B_closer roughly doubled object pixels (cup 0.23%->0.41% of frame) but grasp success was
+unchanged (cup 20%, box 0%); for grasp/box the EE already lands ~3.4cm XY from target with held=0 --
+the arm reaches, the scripted rim/box close-and-lift misses. B did help fine positioning
+(reach_with_object/box @6cm 40%->80%, cup eeZ 3.0->1.5cm). C_droidlike collapsed (25-49cm) because
+the azimuth change breaks the (uncorrected) action frame. Planned gripper == frozen for grasp.
+**Conclusion**: the grasp ceiling is the sim grasp mechanics / success criteria, not visual salience,
+the gripper freeze, or CEM samples alone. Camera tuning must keep the validated az/el (move distance
+only) unless W* is fit and applied. Keep B_closer as a mild precision win; do not expect it to fix
+grasp.
+
 ### 2026-07-06 -- Two-round audit + fixes of the fixed-bundle loader
 
 #### 20. Prioritized audit (P0/P1/P2/P3) and fixes, no P0 found

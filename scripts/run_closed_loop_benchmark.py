@@ -911,6 +911,34 @@ TASKS = {"reach": task_reach, "grasp_lift": task_grasp_lift, "place": task_place
 assert set(TASKS) == set(LEGACY_TASKS)
 
 
+# Candidate planning cameras for the camera-salience experiment (partial overrides of
+# PLANNING_CAMERA). A_current == the validated default; B keeps the angle and moves closer (more
+# object/gripper pixels, same action frame); C is a DROID-like left-exo view (angle change ->
+# action-frame confound, so log action alignment separately). See scripts/camera_salience_probe.py.
+CAMERA_PRESETS = {
+    "A_current":   {},
+    "B_closer":    {"distance": 1.05},
+    "C_droidlike": {"azimuth": -135.0, "elevation": -30.0, "distance": 1.3},
+}
+
+# image key -> saved qpos key, for re-rendering goal images from a candidate camera (so the
+# observation and the goal image always share the same viewpoint).
+_GOAL_QPOS = {"goal": "qpos_goal", "goal_1": "qpos_goal_1", "goal_2": "qpos_goal_2"}
+
+
+def _rerender_goals(env, arr, img_keys):
+    """Re-render each goal image from its saved qpos using the env's current planning camera, so a
+    camera override applies to goals as well as observations. Returns {img_key: rgb}. Leaves the env
+    state disturbed -- the caller restores the trial start (set_state(qpos0)) afterward."""
+    out = {}
+    for k in img_keys:
+        qk = _GOAL_QPOS.get(k)
+        if qk is not None and qk in arr:
+            env.set_state(arr[qk])
+            out[k] = env.render(camera="planning")
+    return out
+
+
 def _fixed_goal(img, target):
     """A Stage goal_fn that returns a SAVED goal image + its target xyz (for the bundle benchmark),
     instead of capturing a goal at runtime."""
@@ -936,6 +964,9 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
     zone_xy = arr.get("zone")
     if zone_xy is not None and np.all(np.isfinite(zone_xy)):
         env.set_zone_xy(float(zone_xy[0]), float(zone_xy[1]))
+    if getattr(args, "planning_camera", None):
+        # camera override active -> re-render goals from saved qpos so obs and goals share the view
+        imgs = _rerender_goals(env, arr, list(imgs.keys()))
     env.set_state(arr["qpos0"], gripper=(1.0 if start_grasped else 0.0),
                   settle=(8 if start_grasped else 0))
 
@@ -1138,8 +1169,10 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
                                task, obj, len(ids), args.trials, len(ids))
             ids = ids[: args.trials]
             total_loaded += len(ids)
+            cam_override = CAMERA_PRESETS.get(args.planning_camera) if args.planning_camera else None
             env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
-                                 add_object=True, add_zone=True, object_type=obj, add_distractors=True)
+                                 add_object=True, add_zone=True, object_type=obj, add_distractors=True,
+                                 planning_camera=cam_override)
             fovy = float(env.model.vis.global_.fovy)
             ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                    "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
@@ -1289,6 +1322,10 @@ def main() -> None:
     p.add_argument("--replay-record", default=None,
                    help="dir to save per-trial qpos rollouts (npz) for the interactive 3D replay "
                         "viewer (scripts/replay_rollout_viewer.py). Bundle mode only.")
+    p.add_argument("--planning-camera", choices=list(CAMERA_PRESETS), default=None,
+                   help="override the planning camera (bundle mode): re-renders goal images from the "
+                        "same view so obs and goals stay consistent. A_current=validated default, "
+                        "B_closer=same angle tighter, C_droidlike=left-exo (action-frame confound).")
     p.add_argument("--pos-tol", type=float, default=0.015,
                    help="early-stop the CEM loop when EE is within this of the goal (m); set to the "
                         "tightest precision threshold so the loop does not quit before the strictest "
@@ -1405,6 +1442,10 @@ def main() -> None:
             "dir": args.bundles, "objects": list(args.objects), "tasks": list(args.tasks),
             "trials_per_task_object": args.trials, "rwo_steps": args.rwo_steps,
             "object_rest_half_z_m": {o: OBJECT_SPECS[o]["rest_half_z"] for o in args.objects},
+            "planning_camera": args.planning_camera,
+            "planning_camera_override": (CAMERA_PRESETS.get(args.planning_camera)
+                                         if args.planning_camera else None),
+            "plan_gripper": bool(args.plan_gripper),
         }
         config["env"] = {
             "embodiment": "Franka Panda + Robotiq 2F-85 (FrankaDroidEnv)",

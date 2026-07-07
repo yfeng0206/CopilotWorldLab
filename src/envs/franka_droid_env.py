@@ -74,6 +74,7 @@ class FrankaDroidEnv:
         add_zone: bool = False,
         object_type: str = "cube",
         add_distractors: bool = False,
+        planning_camera: Optional[dict] = None,
         seed: int = 0,
     ) -> None:
         import mujoco
@@ -99,8 +100,11 @@ class FrankaDroidEnv:
         self.render_height = int(render_height)
         self.default_camera = default_camera
         # Validated best zero-shot view (camera ablation). The env renders observations from
-        # this free camera by default; pass camera="exo_cam" or another name to override.
-        self._planning_camera = make_free_camera(**PLANNING_CAMERA)
+        # this free camera by default; pass camera="exo_cam" or another name to override. A
+        # ``planning_camera`` dict partially overrides PLANNING_CAMERA (e.g. {"distance": 1.05})
+        # for camera-placement experiments -- observations AND re-rendered goals use it consistently.
+        self.planning_camera_spec = {**PLANNING_CAMERA, **(planning_camera or {})}
+        self._planning_camera = make_free_camera(**self.planning_camera_spec)
         self.ik_iters = int(ik_iters)
         self.control_substeps = int(control_substeps)
         self.max_translation = float(max_translation)
