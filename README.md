@@ -40,6 +40,12 @@ remaining ceiling is the sim close-and-lift mechanics, not planning — most gra
 1-3 cm before the object tips or slips. Live results and precision curves:
 [`results/benchmarks/full800_B_progress/`](results/benchmarks/full800_B_progress).
 
+A closer look at the grasp misses: the arm is a stiff position servo with the real Franka torque
+limits and no sense of contact, so a slightly-off descent bulldozes the object into the table. Capping
+the arm's contact force makes it stall at the surface instead, recovering the worst-looking misses —
+side-by-side clips and the honest aggregate effect:
+[`results/demos/compliance/README.md`](results/demos/compliance/README.md).
+
 ## How motion is produced
 
 At each control step the model renders the current frame, runs CEM to find the single next
@@ -72,7 +78,9 @@ src/world_model/vjepa2_wrapper.py V-JEPA 2-AC control-loop scaffold
 scripts/generate_task_bundles.py  Scripted expert -> fixed task bundles under tasks/
 scripts/run_closed_loop_benchmark.py  Closed-loop CEM-MPC benchmark; loads bundles, hidden-state success
 scripts/make_demo_gifs.py         Labeled HIT/MISS rollout GIFs, reproduced from logs
+scripts/make_compliance_demo.py   Stiff-vs-compliant side-by-side (contact-force experiment)
 scripts/replay_from_log.py        Reproduce any trial in 3D from the log (deterministic, no GPU)
+scripts/rescore_from_log.py       Estimate a physics fix's benchmark effect from logs (no GPU)
 tasks/                            Fixed task bundles (gitignored; regenerate with the generator)
 tests/                            Geometry, env, grasp physics, success, thresholds
 docs/                             DESIGN, architecture, experiments/, research_log, lessons_learned

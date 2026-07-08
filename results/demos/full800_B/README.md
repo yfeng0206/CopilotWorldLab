@@ -89,3 +89,12 @@ only the gripper open/close is scripted.
 
 > Reproduce/refresh: `python scripts/make_demo_gifs.py` — auto-picks 1 HIT + 1 MISS per completed
 > group and reproduces them from the logs (no GPU model needed).
+
+---
+
+## Why the grasp misses push the object into the table — and a one-line fix
+
+The stiff position servo has no sense of contact, so a slightly-off descent drives the object into the
+tabletop instead of settling on it. Capping the arm's contact force makes it stall at the surface and
+recovers the worst-looking misses. Side-by-side stiff-vs-compliant clips and the honest aggregate
+effect: [`../compliance/README.md`](../compliance/README.md).

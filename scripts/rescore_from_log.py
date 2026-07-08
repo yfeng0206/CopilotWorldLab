@@ -59,8 +59,21 @@ def _find_group(task, obj, tag="full800_B"):
     return best, rows
 
 
+_ARM_DOF = 7   # first 7 actuators are the Franka arm joints; the rest are the gripper
+
+
 def _apply_mods(env, mods):
-    """Modify object physics on the built model: object geom friction/contact + body mass."""
+    """Modify object physics and/or arm compliance on the built model.
+
+    Object knobs act on the manipuland (friction / contact softness / mass). The arm-compliance
+    knobs act on the 7 arm position servos and are the "make it behave like a real robot" fix:
+      - forcelim: scale the arm actuator force cap. The real Franka limits (+/-87 / +/-12 Nm) are
+        plenty to shove a ~50 g object through a soft contact; a real robot avoids that via its
+        controller, not weak motors. Scaling the cap down makes the servo STALL at contact instead
+        of bulldozing, while free-space reaching (forces far below the cap) is unchanged.
+      - armkp: scale the position-servo stiffness (gain + matching bias). Softer = more compliant
+        on contact, but sags more under gravity, so keep it moderate.
+    """
     m = env.model
     cube_bid = env._cube_bid
     gids = [g for g in range(m.ngeom) if int(m.geom_bodyid[g]) == cube_bid]
@@ -77,6 +90,22 @@ def _apply_mods(env, mods):
             f = mods["mass"]
             m.body_mass[cube_bid] *= f
             m.body_inertia[cube_bid] *= f
+    if mods.get("gravcomp"):
+        mj = env._mujoco
+        for b in range(m.nbody):
+            nm = mj.mj_id2name(m, mj.mjtObj.mjOBJ_BODY, b) or ""
+            if nm.startswith("link") or nm == "attachment" or nm.startswith("2f85"):
+                m.body_gravcomp[b] = 1.0   # float the arm/gripper so the force budget is free
+    if mods.get("forcelim"):
+        s = mods["forcelim"]
+        for i in range(_ARM_DOF):
+            m.actuator_forcerange[i] *= s
+            m.actuator_forcelimited[i] = 1
+    if mods.get("armkp"):
+        s = mods["armkp"]
+        for i in range(_ARM_DOF):
+            m.actuator_gainprm[i, 0] *= s
+            m.actuator_biasprm[i, 1] *= s   # keep bias = -gain so it stays a proper position servo
     env._mujoco.mj_forward(m, env.data)
 
 
@@ -186,6 +215,14 @@ def main():
     p.add_argument("--zfloor", type=float, default=None,
                    help="descent guard: clamp executed EE z to >= object_rest_z + this margin (m), "
                         "so the gripper cannot drive the object into the table (e.g. 0.0 or 0.005)")
+    p.add_argument("--forcelim", type=float, default=None,
+                   help="scale the arm actuator force cap (compliance): <1 makes the servo stall at "
+                        "contact instead of bulldozing (e.g. 0.5, 0.3, 0.2)")
+    p.add_argument("--armkp", type=float, default=None,
+                   help="scale the arm position-servo stiffness (gain+bias): <1 is softer/compliant")
+    p.add_argument("--gravcomp", action="store_true",
+                   help="gravity-compensate the arm/gripper bodies (passive float) so the force cap is "
+                        "free to be gentle on contact; pair with --forcelim/--armkp for clean compliance")
     p.add_argument("--grasp-no-upright", action="store_true",
                    help="score grasp as gripped+lifted only (drop the upright/stable gates), matching "
                         "the paper's 'grip the object' definition")
@@ -202,7 +239,8 @@ def main():
         trials = trials[:args.limit]
     logged = {int(r["trial"]): int(r["success_loose"]) for r in rows}
     mods = {"friction": args.friction, "mass": args.mass, "soften": args.soften,
-            "zfloor": args.zfloor}
+            "zfloor": args.zfloor, "forcelim": args.forcelim, "armkp": args.armkp,
+            "gravcomp": args.gravcomp, "grasp_no_upright": args.grasp_no_upright}
     modstr = ", ".join(f"{k}={v}" for k, v in mods.items() if v is not None and v is not False) \
         or "BASELINE (no change)"
 
