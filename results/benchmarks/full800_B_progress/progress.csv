@@ -1,5 +1,6 @@
 task_object,n,success_loose_pct,mean_err_cm
 grasp/box,50,12.0,4.85
 grasp/cup,50,40.0,6.58
+grasp_and_reach/cup,40,30.0,15.77
 reach_with_object/box,50,96.0,4.62
 reach_with_object/cup,50,98.0,5.19

@@ -21,10 +21,13 @@ whether the object is **held**, its **tilt**, and the trial's **final error**.
 | grasp / box | **12%** @6cm | 25% | HIT grips the block; MISS tips it during close/lift |
 | reach_with_object / cup | **98%** @10cm | 75% | held cup carried cleanly to the goal |
 | reach_with_object / box | **94%** @10cm | 75% | held block carried to the goal; rare MISS tips it |
+| grasp_and_reach / cup | **31%** @10cm | (custom) | HIT grasps then carries to target; MISS grasps then drops mid-carry |
 
 **reach_with_object beats the paper's real-robot rate.** Grasp closed most of the prior gap (cup was
 20%, box 0%). Grasp misses are almost always the object *tipping / slipping* even when the reach is
-within 1–3 cm — the ceiling is the sim grasp mechanics, not V-JEPA's planning.
+within 1–3 cm — the ceiling is the sim grasp mechanics, not V-JEPA's planning. The compositional
+**grasp_and_reach** (grasp off the table, then carry) succeeds ~1/3 of the time on cup: once the
+grasp lands, the strong held-carry finishes it; most misses are the object *dropped* during transport.
 
 ---
 
@@ -41,6 +44,15 @@ within 1–3 cm — the ceiling is the sim grasp mechanics, not V-JEPA's plannin
 |---|---|---|
 | **cup** | ![rwo cup HIT](reach_with_object_cup_HIT.gif) | ![rwo cup MISS](reach_with_object_cup_MISS.gif) |
 | **box** | ![rwo box HIT](reach_with_object_box_HIT.gif) | ![rwo box MISS](reach_with_object_box_MISS.gif) |
+
+## Grasp-and-reach — V-JEPA grasps off the table (goal 1), then carries it to a target (goal 2)
+
+A 2-sub-goal composite: it chains the weak grasp with the strong held-carry, so success (~31% on cup)
+tracks the grasp landing; the common MISS is the object *dropped* during transport.
+
+| | HIT | MISS |
+|---|---|---|
+| **cup** | ![gnr cup HIT](grasp_and_reach_cup_HIT.gif) | ![gnr cup MISS](grasp_and_reach_cup_MISS.gif) |
 
 ---
 

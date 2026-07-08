@@ -172,9 +172,13 @@ def render_demo(run_dir, task, obj, trial, outcome, final_err_cm, failure, out_g
 
 def main():
     groups = [("grasp", "cup"), ("grasp", "box"),
-              ("reach_with_object", "cup"), ("reach_with_object", "box")]
+              ("reach_with_object", "cup"), ("reach_with_object", "box"),
+              ("grasp_and_reach", "cup"), ("grasp_and_reach", "box"),
+              ("pick_place", "cup"), ("pick_place", "box"),
+              ("place_with_object", "cup"), ("place_with_object", "box")]
     # pin specific trials for a clearer demo where the auto-pick is not the most illustrative
-    pin = {("reach_with_object", "box", "MISS"): 18}
+    pin = {("reach_with_object", "box", "MISS"): 18,
+           ("grasp_and_reach", "cup", "MISS"): 10}   # a representative 'dropped' (grasp then lose it)
     out_dir = os.path.join(_REPO_ROOT, "results", "demos", "full800_B")
     for task, obj in groups:
         run_dir, rows = _find_group(task, obj)
