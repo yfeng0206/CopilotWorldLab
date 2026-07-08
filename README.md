@@ -31,7 +31,7 @@ directly comparable.
 |---|---|---|---|---|
 | grasp | on table | reach to grasp pose | cup 38% / box 10% @6cm | 65% / 25% |
 | reach_with_object | held | carry to a goal | cup 98% / box 96% @10cm | 75% / 75% |
-| grasp_and_reach | on table | grasp, then carry (2 goals) | cup 30% @10cm | custom |
+| grasp_and_reach | on table | grasp, then carry (2 goals) | cup 18% / box 4% @10cm | custom |
 | pick_place | on table | grasp, vicinity, place (4/10/4) | running | 80% / 65% |
 | place_with_object | held | carry to zone, place (2 goals) | running | custom |
 
