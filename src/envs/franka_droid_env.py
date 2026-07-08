@@ -137,11 +137,13 @@ class FrankaDroidEnv:
         if self.add_zone:
             self._zone_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, PLACE_ZONE_BODY)
             self._zone_mocap = int(self.model.body_mocapid[self._zone_bid])
+        self._table_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "table")
 
         self._gripper_cmd = 0.0  # commanded gripper in [0, 1] (0 = open, 1 = closed)
         self.last_ik_pos_err = 0.0
         self.last_ik_rot_err = 0.0
         self.last_action_ok = True
+        self.peak_wall_force = 0.0   # peak arm/gripper-into-table press this episode (N); see hit_wall
         self._renderer = None
         self.reset()
 
@@ -152,6 +154,7 @@ class FrankaDroidEnv:
         self.data.ctrl[:ARM_DOF] = ARM_HOME_QPOS  # position servos hold home
         self._set_gripper_cmd(0.0)
         self.last_action_ok = True
+        self.peak_wall_force = 0.0
         if self._cube_qadr >= 0:
             self._place_cube(cube_xy)
         self._mujoco.mj_forward(self.model, self.data)
@@ -348,9 +351,55 @@ class FrankaDroidEnv:
         if self.last_action_ok:
             self.data.ctrl[:ARM_DOF] = q
             self._set_gripper_cmd(self._gripper_cmd + gripper_delta)
-        for _ in range(substeps):
-            self._mujoco.mj_step(self.model, self.data)
+        self._step_physics(substeps)
         return pos_err, rot_err
+
+    def _step_physics(self, substeps: int) -> None:
+        """Advance the sim ``substeps`` times, then sample the arm-into-table press (see hit_wall)."""
+        mj = self._mujoco
+        for _ in range(substeps):
+            mj.mj_step(self.model, self.data)
+        self._track_wall_force()
+
+    def _track_wall_force(self) -> None:
+        """Accumulate the peak *settled* normal force of any arm/gripper geom pressing into the
+        tabletop, sampled once at the end of a control step (quasi-static, not the transient
+        substep spikes a stiff contact produces).
+
+        This is the 'hit a wall' signal: a stiff position servo has no force limit, so when it drives
+        the gripper down into the (hard) table it keeps pressing with tens of N -- the object cannot
+        tunnel through, so the arm bulldozes the surface. A clean grasp presses ~0 N here and a light
+        lateral graze only a few N, so a modest threshold (see ``hit_wall``) separates a real wall
+        press (score it a fail) from a harmless nudge that just slides the object aside. Only DIRECT
+        gripper/arm-vs-table contact counts -- a held object resting on the table does not, because the
+        object (not the arm) is what touches the surface."""
+        if self._table_bid < 0:
+            return
+        if self.gripper_holds_object():
+            return   # a held object touching the table is placement, not a bulldoze -- don't count it
+        m, d, mj = self.model, self.data, self._mujoco
+        f6 = np.zeros(6)
+        for i in range(d.ncon):
+            c = d.contact[i]
+            b1 = int(m.geom_bodyid[c.geom1])
+            b2 = int(m.geom_bodyid[c.geom2])
+            arm = None
+            if b1 == self._table_bid and self._is_arm_or_grip_body(b2):
+                arm = b2
+            elif b2 == self._table_bid and self._is_arm_or_grip_body(b1):
+                arm = b1
+            if arm is not None:
+                mj.mj_contactForce(m, d, i, f6)
+                self.peak_wall_force = max(self.peak_wall_force, abs(float(f6[0])))
+
+    def _is_arm_or_grip_body(self, bid: int) -> bool:
+        name = self._mujoco.mj_id2name(self.model, self._mujoco.mjtObj.mjOBJ_BODY, int(bid)) or ""
+        return name.startswith("link") or name.startswith("2f85_") or name == "attachment"
+
+    def hit_wall(self, threshold: float = 10.0) -> bool:
+        """True if the arm/gripper pressed into the table harder than ``threshold`` N this episode
+        (a bulldoze the un-limited stiff servo cannot avoid). Light grazes/side pushes stay below it."""
+        return self.peak_wall_force > float(threshold)
 
     def _place_ee_kinematic(self, target_pos, target_quat) -> tuple:
         """KINEMATIC preview only: teleport the arm to the IK solution (no dynamics)."""

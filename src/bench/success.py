@@ -102,11 +102,11 @@ def place_success(obj_xy, zone_xy, tilt_rad: float, speed: float, released: bool
 # Ordered (gate -> failure reason) per task: the FIRST failed gate names the failure. If every gate
 # holds but the object is outside the loosest precision sphere, it is a pure distance miss.
 _BUNDLE_FAILURE_ORDER = {
-    "grasp": [("held", "missed"), ("lifted", "not_lifted"),
+    "grasp": [("no_wall", "hit_table"), ("held", "missed"), ("lifted", "not_lifted"),
               ("upright", "tipped"), ("stable", "unstable")],
     "reach_with_object": [("held", "dropped"), ("upright", "tipped")],
-    "grasp_and_reach": [("held", "dropped"), ("upright", "tipped")],
-    "pick_place": [("grasped", "grasp_failed"), ("released", "not_released"),
+    "grasp_and_reach": [("no_wall", "hit_table"), ("held", "dropped"), ("upright", "tipped")],
+    "pick_place": [("no_wall", "hit_table"), ("grasped", "grasp_failed"), ("released", "not_released"),
                    ("upright", "tipped"), ("stable", "unstable")],
     "place_with_object": [("released", "not_released"), ("upright", "tipped"),
                           ("stable", "unstable")],

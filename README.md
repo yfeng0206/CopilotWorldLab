@@ -29,22 +29,17 @@ directly comparable.
 
 | task | object starts | V-JEPA plans | our success | paper (Table 3) |
 |---|---|---|---|---|
-| grasp | on table | reach to grasp pose | cup 40% / box 12% @6cm | 65% / 25% |
+| grasp | on table | reach to grasp pose | cup 38% / box 10% @6cm | 65% / 25% |
 | reach_with_object | held | carry to a goal | cup 98% / box 96% @10cm | 75% / 75% |
-| grasp_and_reach | on table | grasp, then carry (2 goals) | cup 31% @10cm | custom |
+| grasp_and_reach | on table | grasp, then carry (2 goals) | cup 30% @10cm | custom |
 | pick_place | on table | grasp, vicinity, place (4/10/4) | running | 80% / 65% |
 | place_with_object | held | carry to zone, place (2 goals) | running | custom |
 
-reach_with_object exceeds the paper's real-robot rate. Grasp closes most of the prior gap; the
-remaining ceiling is the sim close-and-lift mechanics, not planning — most grasp misses reach within
-1-3 cm before the object tips or slips. Live results and precision curves:
+reach_with_object exceeds the paper's real-robot rate. The table is a hard contact, so a light object
+cannot be pushed into it; if the arm drives the gripper into the tabletop the trial fails outright
+rather than tunneling through. Grasp misses are mostly a few-cm reach error before the object tips or
+slips. Live results and precision curves:
 [`results/benchmarks/full800_B_progress/`](results/benchmarks/full800_B_progress).
-
-A closer look at the grasp misses: the arm is a stiff position servo with the real Franka torque
-limits and no sense of contact, so a slightly-off descent bulldozes the object into the table. Capping
-the arm's contact force makes it stall at the surface instead, recovering the worst-looking misses —
-side-by-side clips and the honest aggregate effect:
-[`results/demos/compliance/README.md`](results/demos/compliance/README.md).
 
 ## How motion is produced
 
@@ -78,9 +73,7 @@ src/world_model/vjepa2_wrapper.py V-JEPA 2-AC control-loop scaffold
 scripts/generate_task_bundles.py  Scripted expert -> fixed task bundles under tasks/
 scripts/run_closed_loop_benchmark.py  Closed-loop CEM-MPC benchmark; loads bundles, hidden-state success
 scripts/make_demo_gifs.py         Labeled HIT/MISS rollout GIFs, reproduced from logs
-scripts/make_compliance_demo.py   Stiff-vs-compliant side-by-side (contact-force experiment)
 scripts/replay_from_log.py        Reproduce any trial in 3D from the log (deterministic, no GPU)
-scripts/rescore_from_log.py       Estimate a physics fix's benchmark effect from logs (no GPU)
 tasks/                            Fixed task bundles (gitignored; regenerate with the generator)
 tests/                            Geometry, env, grasp physics, success, thresholds
 docs/                             DESIGN, architecture, experiments/, research_log, lessons_learned

@@ -232,6 +232,14 @@ def build_franka_robotiq(menagerie_dir: str = DEFAULT_MENAGERIE, add_camera: boo
     top.type = mujoco.mjtGeom.mjGEOM_BOX
     top.size = [0.35, 0.5, 0.02]
     top.rgba = [0.75, 0.68, 0.55, 1.0]
+    # Hard, high-priority tabletop: a light manipuland cannot be driven into/through it -- if the arm
+    # presses down off-center the object stays on the surface and slides/tips ON the table instead of
+    # tunneling through (non-physical). Priority makes the table's contact params win, so we also give
+    # it the manipuland's grip-friendly friction (else the lower default friction would fling objects).
+    top.solref = [0.004, 1.0]
+    top.solimp = [0.99, 0.999, 0.0001, 0.5, 2.0]
+    top.priority = 5
+    top.friction = list(_OBJ_FRICTION)
 
     light = world.add_light()
     light.pos = [0.4, 0.0, 1.6]

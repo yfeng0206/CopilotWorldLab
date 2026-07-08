@@ -969,6 +969,8 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         imgs = _rerender_goals(env, arr, list(imgs.keys()))
     env.set_state(arr["qpos0"], gripper=(1.0 if start_grasped else 0.0),
                   settle=(8 if start_grasped else 0))
+    env.peak_wall_force = 0.0   # measure the arm-into-table press over this trial only (see hit_wall)
+    wall_thresh = getattr(args, "wall_fail_thresh", 10.0)
 
     def stg(name, img_key, tgt_key, steps, fixed=False):
         return Stage(name, _fixed_goal(imgs[img_key], arr[tgt_key]), steps, fixed_steps=fixed)
@@ -984,7 +986,8 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         obj = env.object_position()
         gates = {"lifted": float(obj[2] - obj_z0) > 0.04, "held": bool(env.gripper_holds_object()),
                  "upright": float(np.degrees(env.object_tilt())) < 30.0,
-                 "stable": float(env.object_speed()) < 0.05}
+                 "stable": float(env.object_speed()) < 0.05,
+                 "no_wall": not env.hit_wall(wall_thresh)}
         target = arr["grasp_pos"]
 
     elif task in ("reach_with_object", "grasp_and_reach"):
@@ -1000,6 +1003,8 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         error = float(np.linalg.norm(obj - goal_obj))
         held = bool(env.gripper_holds_object())
         gates = {"held": held, "upright": float(np.degrees(env.object_tilt())) < 30.0}
+        if task == "grasp_and_reach":
+            gates["no_wall"] = not env.hit_wall(wall_thresh)   # bulldoze during the initial grasp
         target = arr["goal_ee"]
 
     elif task == "pick_place":  # 3 sub-goals on the fixed 4 / 10 / 4 schedule
@@ -1017,7 +1022,8 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         obj = env.object_position()
         error = float(np.linalg.norm(obj[:2] - env.zone_center()))
         gates = {"grasped": grasped, "upright": float(np.degrees(env.object_tilt())) < 25.0,
-                 "stable": float(env.object_speed()) < 0.05, "released": bool(env.object_placed())}
+                 "stable": float(env.object_speed()) < 0.05, "released": bool(env.object_placed()),
+                 "no_wall": not env.hit_wall(wall_thresh)}
         target = arr["place_pos"]
 
     else:  # place_with_object -- object starts HELD; place half of pick_place (vicinity -> place)
@@ -1340,6 +1346,9 @@ def main() -> None:
                    help="override the planning camera (bundle mode): re-renders goal images from the "
                         "same view so obs and goals stay consistent. A_current=validated default, "
                         "B_closer=same angle tighter, C_droidlike=left-exo (action-frame confound).")
+    p.add_argument("--wall-fail-thresh", type=float, default=10.0,
+                   help="score a trial as a fail if the arm pressed into the table harder than this "
+                        "(N) -- a bulldoze the stiff servo cannot avoid. Light side-grazes stay below.")
     p.add_argument("--pos-tol", type=float, default=0.015,
                    help="early-stop the CEM loop when EE is within this of the goal (m); set to the "
                         "tightest precision threshold so the loop does not quit before the strictest "
@@ -1467,6 +1476,7 @@ def main() -> None:
             "objects": list(args.objects), "add_distractors": True,
             "start": "restored from saved bundle qpos0 (fixed, not randomized)",
             "place_zone": "restored per bundle (mocap place zone)",
+            "wall_fail_thresh_N": args.wall_fail_thresh,
         }
     else:
         config["mode"] = "random_per_trial"

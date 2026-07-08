@@ -17,17 +17,18 @@ whether the object is **held**, its **tilt**, and the trial's **final error**.
 
 | task / object | our success@loosest | paper | in the clips |
 |---|---|---|---|
-| grasp / cup | **40%** @6cm | 65% | HIT lands the rim; MISS reaches ~2 cm then the cup tips/slips |
-| grasp / box | **12%** @6cm | 25% | HIT grips the block; MISS tips it during close/lift |
+| grasp / cup | **38%** @6cm | 65% | HIT lands the rim; MISS reaches ~2 cm then the cup tips/slips |
+| grasp / box | **10%** @6cm | 25% | HIT grips the block; MISS misses or drives into the table |
 | reach_with_object / cup | **98%** @10cm | 75% | held cup carried cleanly to the goal |
-| reach_with_object / box | **94%** @10cm | 75% | held block carried to the goal; rare MISS tips it |
-| grasp_and_reach / cup | **31%** @10cm | (custom) | HIT grasps then carries to target; MISS grasps then drops mid-carry |
+| reach_with_object / box | **96%** @10cm | 75% | held block carried to the goal; rare MISS tips it |
+| grasp_and_reach / cup | **30%** @10cm | (custom) | HIT grasps then carries to target; MISS grasps then drops mid-carry |
 
-**reach_with_object beats the paper's real-robot rate.** Grasp closed most of the prior gap (cup was
-20%, box 0%). Grasp misses are almost always the object *tipping / slipping* even when the reach is
-within 1–3 cm — the ceiling is the sim grasp mechanics, not V-JEPA's planning. The compositional
-**grasp_and_reach** (grasp off the table, then carry) succeeds ~1/3 of the time on cup: once the
-grasp lands, the strong held-carry finishes it; most misses are the object *dropped* during transport.
+**reach_with_object beats the paper's real-robot rate.** The table is a hard contact: a light object
+cannot be pushed into it, and if the arm drives the gripper into the tabletop the trial fails outright
+(labeled `hit_table`) instead of tunneling through. Grasp misses are mostly a few-cm reach error
+before the object tips or slips. The compositional **grasp_and_reach** (grasp off the table, then
+carry) succeeds ~1/3 of the time on cup: once the grasp lands, the strong held-carry finishes it; most
+misses are the object *dropped* during transport.
 
 ---
 
@@ -89,12 +90,3 @@ only the gripper open/close is scripted.
 
 > Reproduce/refresh: `python scripts/make_demo_gifs.py` — auto-picks 1 HIT + 1 MISS per completed
 > group and reproduces them from the logs (no GPU model needed).
-
----
-
-## Why the grasp misses push the object into the table — and a one-line fix
-
-The stiff position servo has no sense of contact, so a slightly-off descent drives the object into the
-tabletop instead of settling on it. Capping the arm's contact force makes it stall at the surface and
-recovers the worst-looking misses. Side-by-side stiff-vs-compliant clips and the honest aggregate
-effect: [`../compliance/README.md`](../compliance/README.md).
