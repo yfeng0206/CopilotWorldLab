@@ -1,93 +1,87 @@
 # CopilotWorldLab
 
-Learned world-model manipulation for self-driving chemistry laboratories: a latent video world
-model (V-JEPA 2-AC) drives the coarse robot-arm motion by planning to a goal image, and that same
-model's own predictive energy is proposed as the gate that hands off to a classical, vision-only
-precise seat. This repository is the **Stage-1 simulation** substrate; the design rationale and the
-broader proposal live in [`docs/DESIGN.md`](docs/DESIGN.md).
+A latent video world model (V-JEPA 2-AC) plans coarse robot-arm motion by minimizing distance to a
+goal image, and the model's own predictive energy is proposed as the confidence signal that hands off
+to a classical, vision-only precise controller. This repository is the Stage-1 simulation substrate.
+The design rationale is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-## Current phase
+<p align="center">
+  <img src="results/demos/full800_B/reach_with_object_cup_HIT.gif" width="360" alt="reach-with-object cup, success">
+  <img src="results/demos/full800_B/grasp_cup_HIT.gif" width="360" alt="grasp cup, success">
+</p>
+<p align="center"><em>V-JEPA 2-AC driving a Franka in MuJoCo, planning to goal images.
+More clips: <a href="results/demos/full800_B/">demo reel</a>.</em></p>
 
-**Phase 0 — set up and reproduce V-JEPA 2-AC honestly.** Load the released model, build a
-paper-faithful MuJoCo env, and verify the world model reproduces the paper (energy landscape,
-transition scoring on real DROID, closed-loop CEM to goal images) before adding our own method.
-The full roadmap is in [`docs/DESIGN.md`](docs/DESIGN.md#0-project-roadmap-phases):
+## What this is
 
-| Phase | What | State |
+We reproduce the planning result from *V-JEPA 2* (Assran et al., arXiv:2506.09985, §4) in our own
+MuJoCo environment, then evaluate it as a coarse controller across a fixed benchmark. The model is
+frozen; motion comes entirely from model-predictive control (greedy horizon-1 CEM) toward image
+goals. Gripper open/close is scripted at fixed stage boundaries, so the reported numbers isolate
+V-JEPA's spatial planning. Success is judged from hidden simulator state, not the latent energy.
+
+## Benchmark
+
+Five tasks x two objects (a rim-graspable cup and a rigid box) x 50 fixed scenarios = 500 rollouts,
+scored at paper-faithful settings (800 CEM samples, 10 refinement steps, horizon 1, maxnorm 0.075).
+Every configuration runs on the same saved bundles under `tasks/`, so results are reproducible and
+directly comparable.
+
+| task | object starts | V-JEPA plans | our success | paper (Table 3) |
+|---|---|---|---|---|
+| grasp | on table | reach to grasp pose | cup 40% / box 12% @6cm | 65% / 25% |
+| reach_with_object | held | carry to a goal | cup 98% / box 96% @10cm | 75% / 75% |
+| grasp_and_reach | on table | grasp, then carry (2 goals) | cup 31% @10cm | custom |
+| pick_place | on table | grasp, vicinity, place (4/10/4) | running | 80% / 65% |
+| place_with_object | held | carry to zone, place (2 goals) | running | custom |
+
+reach_with_object exceeds the paper's real-robot rate. Grasp closes most of the prior gap; the
+remaining ceiling is the sim close-and-lift mechanics, not planning — most grasp misses reach within
+1-3 cm before the object tips or slips. Live results and precision curves:
+[`results/benchmarks/full800_B_progress/`](results/benchmarks/full800_B_progress).
+
+## How motion is produced
+
+At each control step the model renders the current frame, runs CEM to find the single next
+end-effector action whose predicted next latent is closest to the goal image, executes it, and
+replans. The energy landscape is locally convex near the goal (paper Fig. 9), so greedy descent walks
+the arm to the target — a learned form of visual servoing. Compositional tasks follow a fixed
+sub-goal schedule switched by time index (pick-and-place: 4/10/4), reproduced from the paper. Full
+explanation with clips: [`results/demos/full800_B/README.md`](results/demos/full800_B/README.md).
+
+## Roadmap
+
+| Phase | Content | State |
 |---|---|---|
-| **0** | Setup + reproduce V-JEPA 2-AC world model | done |
-| **1** | Fixed-bundle closed-loop benchmark: grasp / reach_with_object / grasp_and_reach / pick_place x cup/box, 50 trials each | current |
-| 2 | POV/wrist CNN coarse-to-fine (improvement #1) | planned |
-| 3 | 3rd + first-person cross-attention latent (our method) | planned |
+| 0 | Load V-JEPA 2-AC, build a paper-faithful MuJoCo env, reproduce the world model | done |
+| 1 | Fixed-bundle closed-loop benchmark (5 tasks x cup/box x 50) | current |
+| 2 | POV/wrist CNN coarse-to-fine handoff | planned |
+| 3 | Third- + first-person cross-attention latent | planned |
 | 4 | Unified cross-view latent | planned |
 
-## Results so far
-
-Reproducible experiments with honest, primary-source-verified numbers (see
-[`docs/experiments/`](docs/experiments)):
-
-- **Demo reel** — labeled HIT/MISS rollout GIFs (grasp + reach-with-object, cup/box) with the
-  paper's greedy-MPC explanation: [`results/demos/full800_B/`](results/demos/full800_B). reach-with-
-  object **98% / 94%** beats the paper's 75%.
-
-- **Energy-landscape reproduction** (correctness gate): the model reproduces the paper's behaviour
-  — latent-energy minimum near the ground-truth action (reverse cos **+0.98**), reverse flips.
-- **Camera-placement ablation**: the horizontal action frame is view-relative; the best zero-shot
-  view (`az45_el45`, now `PLANNING_CAMERA`) improves action-alignment cosine by **+1.08** over the
-  built-in camera. [writeup](docs/experiments/energy_landscape_and_camera_ablation.md)
-- **Transition scoring on real DROID** (vanilla baseline, n=300 from `lerobot/droid_100`): the true
-  action beats **82.0%** of random negatives vs a **48.6%** (chance) different-episode null — a
-  +0.334 image-conditioning effect. The fine-tuned predictor will be measured against this.
-  [writeup](docs/experiments/transition_scoring.md)
-- **Closed-loop CEM (Phase 1 pilot)**: reach to a goal image **succeeds** in the control loop;
-  the ~3 cm precision floor is diagnosed as a model/interface limit (tracking error only 9 mm).
-  [writeup](docs/experiments/cem_closed_loop.md)
-- **Closed-loop task success (Phase 1, in rebuild)**: honest **grasp / reach_with_object /
-  grasp_and_reach / pick_place** on our own MuJoCo env. The set is inspired by the V-JEPA 2 robot
-  tasks (arXiv 2506.09985 Table 3) but customized: plain EE-to-point reach was dropped as
-  uninteresting and replaced by the 2-goal **grasp_and_reach** task. V-JEPA plans the coarse motion,
-  with scripted gripper actions and hidden-state success. Each task runs on **two objects** (a
-  rim-graspable **cube cup** and a rigid **box**) on the **same** scene with the target geom swapped,
-  and on **fixed, saved task bundles** (start + sub-goal + goal frames + states + camera per
-  scenario, inspectable under `tasks/`), so runs are reproducible and every config is scored on
-  identical scenarios. Success = Euclidean delta within a **swept sphere radius `x`** (mean delta +
-  success rate reported per `x`). **50 trials per (task, object)** = 400 scenarios. Methodology:
-  [closed_loop_benchmark.md](docs/experiments/closed_loop_benchmark.md).
-
-Honest boundary: V-JEPA plans spatial motion; gripper actions are scripted, and **grasp** uses a
-scripted lift after the just-grabbed goal to test success. All tasks are scored on hidden privileged
-sim state. The earlier random-per-trial runs (and their committed reports) were cleared in a
-clean-slate reset to move to the fixed-bundle + two-object design above; they remain recoverable from
-git history.
+Earlier reproductions (energy landscape, DROID transition scoring, closed-loop CEM pilot, camera
+ablation) are written up under [`docs/experiments/`](docs/experiments).
 
 ## Repository layout
 
 ```
-src/envs/franka_build.py         Compose Franka Panda + Robotiq 2F-85 (+ cup/box object, place zone, distractors)
-src/envs/franka_droid_env.py     FrankaDroidEnv: real 7-DoF EE control via differential IK + physics
-src/bench/schema.py              Task-bundle schema (start/goal/sub-goal images + states + model XML)
-src/bench/success.py             Hidden success functions and task gates
-src/bench/thresholds.py          Precision thresholds + physical gate spec per task
-src/envs/robomimic_render.py     Render robomimic raw demos on Windows (reference/image source only)
-src/utils/{ik,geometry,logging,config}.py   IK, SO(3) helpers, JEPA-style logging, YAML config
-src/world_model/vjepa2_wrapper.py            V-JEPA 2-AC control-loop scaffold
-scripts/download_checkpoints.py  Fetch V-JEPA 2 weights (size + SHA256 verified)
-scripts/vjepa2_ac_infer_test.py  Load V-JEPA 2-AC, time CEM planning (bf16, chunked)
-scripts/generate_task_bundles.py Scripted expert -> fixed task bundles under tasks/ (start/sub-goals/goal + states)
-scripts/run_closed_loop_benchmark.py  Closed-loop CEM-MPC benchmark; loads fixed bundles, hidden-state success
-scripts/energy_landscape_repro.py, render_franka_transitions.py, analyze_frame_rotation.py
-scripts/benchmark_transition_scoring.py, extract_droid_transitions.py, plot_transition_benchmark.py
-scripts/cem_reach_loop.py, plot_cem_loop.py     Closed-loop CEM planning to goal image(s)
-tasks/                           Fixed, inspectable task bundles (grasp/reach_with_object/grasp_and_reach/pick_place x cup/box)
-examples/task_bundles/           Tiny tracked sample: one bundle per task/object pair for peer inspection
-tests/                           Geometry, Franka env, grasp physics, success, thresholds, utils
-docs/                            architecture, DESIGN, experiments/, research_log, lessons_learned, ...
+src/envs/franka_build.py          Franka Panda + Robotiq 2F-85 scene (cup/box, place zone, distractors)
+src/envs/franka_droid_env.py      FrankaDroidEnv: 7-DoF EE control via differential IK
+src/bench/                        Task-bundle schema, hidden success functions, thresholds/gates
+src/world_model/vjepa2_wrapper.py V-JEPA 2-AC control-loop scaffold
+scripts/generate_task_bundles.py  Scripted expert -> fixed task bundles under tasks/
+scripts/run_closed_loop_benchmark.py  Closed-loop CEM-MPC benchmark; loads bundles, hidden-state success
+scripts/make_demo_gifs.py         Labeled HIT/MISS rollout GIFs, reproduced from logs
+scripts/replay_from_log.py        Reproduce any trial in 3D from the log (deterministic, no GPU)
+tasks/                            Fixed task bundles (gitignored; regenerate with the generator)
+tests/                            Geometry, env, grasp physics, success, thresholds
+docs/                             DESIGN, architecture, experiments/, research_log, lessons_learned
 ```
 
 ## Setup
 
-Verified on Windows 11, RTX 3090 (24 GB), Python 3.11. PyTorch is installed from the CUDA 12.4
-wheel index; the rest from `requirements.txt` (or `environment.yml` for conda).
+Windows 11, RTX 3090 (24 GB), Python 3.11. PyTorch from the CUDA 12.4 wheel index; the rest from
+`requirements.txt`.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_env.ps1
@@ -96,14 +90,11 @@ python -m pytest -q
 python scripts\download_checkpoints.py        # V-JEPA 2-AC checkpoint (~11.8 GB)
 ```
 
-### Vendored third-party repos (gitignored; fetch once)
-
-The V-JEPA scripts import `third_party/vjepa2`; the Franka env needs MuJoCo Menagerie:
+The V-JEPA scripts import `third_party/vjepa2`; the env needs MuJoCo Menagerie (both gitignored):
 
 ```powershell
 git clone https://github.com/facebookresearch/vjepa2 third_party/vjepa2
 git -C third_party/vjepa2 checkout 204698b
-
 git clone --depth 1 --filter=blob:none --sparse `
   https://github.com/google-deepmind/mujoco_menagerie.git third_party/mujoco_menagerie
 git -C third_party/mujoco_menagerie sparse-checkout set franka_emika_panda robotiq_2f85
@@ -113,32 +104,18 @@ git -C third_party/mujoco_menagerie sparse-checkout set franka_emika_panda robot
 
 | | |
 |---|---|
-| Design, novelty claim, roadmap | [`docs/DESIGN.md`](docs/DESIGN.md) |
-| Technical architecture + flowcharts | [`docs/architecture.md`](docs/architecture.md) |
-| Compute budget, checkpoint, fine-tune plan | [`docs/vjepa2_ac_architecture.md`](docs/vjepa2_ac_architecture.md) |
-| Experiments (energy landscape, ablation, benchmarks, closed loop) | [`docs/experiments/`](docs/experiments) |
-| Closed-loop task-success benchmark (setup, criteria, logging, results) | [`docs/experiments/closed_loop_benchmark.md`](docs/experiments/closed_loop_benchmark.md) |
-| Evaluation strategy | [`docs/experiments/benchmark_plan.md`](docs/experiments/benchmark_plan.md) |
-| Related work (full-text-verified) | [`docs/related_work.md`](docs/related_work.md) |
+| Design, novelty, roadmap | [`docs/DESIGN.md`](docs/DESIGN.md) |
+| Architecture + flowcharts | [`docs/architecture.md`](docs/architecture.md) |
+| Benchmark methodology | [`docs/experiments/closed_loop_benchmark.md`](docs/experiments/closed_loop_benchmark.md) |
+| Experiments index | [`docs/experiments/`](docs/experiments) |
 | Research log + bibliography | [`docs/research_log.md`](docs/research_log.md) |
-| Lessons learned (debug traps, invariants) | [`docs/lessons_learned.md`](docs/lessons_learned.md) |
-| Plan / backlog | [`docs/plan.md`](docs/plan.md) |
+| Lessons learned | [`docs/lessons_learned.md`](docs/lessons_learned.md) |
 
 ## References
 
 - Assran et al. *V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction and
-  Planning.* arXiv:2506.09985 (2025). [link](https://arxiv.org/abs/2506.09985)
-- Sun et al. *VLA-JEPA: Enhancing Vision-Language-Action Model with Latent World Model.*
-  arXiv:2602.10098 (2026). [link](https://arxiv.org/abs/2602.10098)
-- Syed et al. *Intercepting the Future: Latent-Space Predictive World Model for Dynamic VLA
-  Manipulation* (AHEAD). arXiv:2606.02486 (2026). [link](https://arxiv.org/abs/2606.02486)
-- Ye et al. *Learning to Feel the Future: DreamTacVLA for Contact-Rich Manipulation.*
-  arXiv:2512.23864 (2025). [link](https://arxiv.org/abs/2512.23864)
-- Yu et al. *Siamese CNN for Sub-millimetre-accurate Camera Pose Estimation and Visual Servoing.*
-  arXiv:1903.04713 (2019). [link](https://arxiv.org/abs/1903.04713)
-- Khazatsky et al. *DROID: A Large-Scale In-the-Wild Robot Manipulation Dataset.*
-  arXiv:2403.12945 (2024). [link](https://arxiv.org/abs/2403.12945)
+  Planning.* arXiv:2506.09985 (2025).
+- Khazatsky et al. *DROID: A Large-Scale In-the-Wild Robot Manipulation Dataset.* arXiv:2403.12945 (2024).
 - Todorov et al. *MuJoCo: A physics engine for model-based control.* IROS 2012.
 
-A full, context-annotated bibliography is in
-[`docs/research_log.md`](docs/research_log.md#paper-bibliography).
+A context-annotated bibliography is in [`docs/research_log.md`](docs/research_log.md#paper-bibliography).

@@ -20,46 +20,27 @@ measurement, before any physical hardware.
 - **Stage 3 (grand plan).** Navigation between stations, real instruments, and more
   chemistry and labware.
 
-## Immediate next steps (next session)
+## Immediate next steps
 
-Done so far: encoder + AC predictor load; CEM latency measured (~32 s at 800 samples);
-interface calibration via the **camera ablation** (view-relative frame; `PLANNING_CAMERA` =
-az45_el45 is the `FrankaDroidEnv` default); **benchmark 1** (transition scoring) hardened on a
-**real DROID batch** (n=300 from `lerobot/droid_100`): rank_frac **0.820** vs different-episode
-null **0.486** (+0.334 image-conditioning effect), top1 0.320, gap_z +1.45
-(`docs/experiments/transition_scoring.md`); and **Phase 1 closed-loop CEM** to a goal image
-(`docs/experiments/cem_closed_loop.md`) -- reach succeeds (goal image in 3 steps), multi-goal
-chaining works, and the ~3 cm precision floor is diagnosed as a model/interface limit (tracking
-error only 9 mm), motivating W* + fine-tuning. robosuite/ManiSkill closed-loop *rollout* is
-Windows-blocked (lessons #11/#18), but robomimic raw states re-render on Windows for grasp/place
-*task* sources (#11/#19); DROID gives the real-robot *transition* baseline. The plan is
-benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
+Reproduction is complete: the encoder + AC predictor load, CEM latency is characterized (~32 s at
+800 samples), the camera ablation fixed a view-relative action frame (`PLANNING_CAMERA` = az45_el45),
+DROID transition scoring gives a real-robot baseline (rank_frac 0.820 vs 0.486 null), and closed-loop
+CEM reaches goal images. The fixed-bundle benchmark is built and running.
 
-1. **Fixed-bundle closed-loop benchmark (Phase 1, in build).** Replace the random-per-trial scenarios
-   with **fixed, saved task bundles** and run **grasp / reach_with_object / grasp_and_reach /
-   pick_place** on **two objects** (a rim-graspable **cube cup** and a rigid **box**), **50 trials per
-   (task, object)** = 400 scenarios, on **one env** with the target geom swapped. The set is inspired
-   by the paper's robot tasks (arXiv 2506.09985 Table 3) but drops plain reach as uninteresting and
-   adds the 2-goal grasp_and_reach composition. Success = Euclidean delta within a **swept sphere
-   radius `x`** (mean delta + success@x). Steps: (a) add cup/box + distractors to `franka_build.py`;
-   (b) `scripts/generate_task_bundles.py` — a scripted expert renders start/sub-goals/goal + states +
-   camera per scenario into `tasks/…`, validated (expert must complete it) with contact sheets for
-   inspection; (c) a `--bundles` loader in `run_closed_loop_benchmark.py` (deterministic, replaces
-   `_rand_cube_xy`); (d) run at samples 200/400/800 and report per (task, object). Goal frames:
-   grasp = 1 goal (object just grabbed, not lifted; scripted lift tests success); reach_with_object =
-   1 goal (object starts in hand); grasp_and_reach = 2 goals (`goal_1` just grabbed, `goal` held-object
-   target); pick_place = 3 goals (`goal_1`, `goal_2`, `goal`) on the fixed 4/10/4 schedule. No
-   robomimic dependency. (`docs/experiments/closed_loop_benchmark.md`.)
-2. **W* calibration + re-run.** Fit/freeze the App. B.4 horizontal rotation for the planning
-   camera and re-run the benchmark; expect grasp/place error to drop -- the first improvement delta.
-3. **FrankaDroidEnv closed-loop pick/place pilot** — DONE (early runner + hidden success).
-4. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small
-   task data; re-run benchmark 1 (same n/H/K/seed) + the closed-loop benchmark (same protocol) and
-   report improvement as metric deltas vs the vanilla baselines.
-5. **ManiSkill (benchmark 2, Linux/WSL2).** Adapter render -> V-JEPA latent -> CEM loop ->
-   step -> official success on PickCube / StackCube / PegInsertionSide (gated on a Linux env).
-5. **Confidence-gate data.** Perturb the start pose, plan, log terminal energy + confound
-   baselines + success label (the project's central gate measurement).
+1. **Full benchmark (running).** 5 tasks x cup/box x 50 = 500 rollouts at paper settings (800
+   samples, horizon 1, maxnorm 0.075, camera B_closer). Live results in
+   `results/benchmarks/full800_B_progress/`; demo reel in `results/demos/full800_B/`. Publish the
+   final per-(task, object) precision curves against paper Table 3.
+2. **W* calibration.** Fit and apply the App. B.4 horizontal rotation so a non-az45 camera (e.g. a
+   DROID-like view) can be used without breaking the action frame; the camera A/B/C experiment showed
+   an azimuth change collapses planning without it.
+3. **Predictor fine-tuning + re-benchmark.** Fine-tune the predictor (frozen encoder) on small task
+   data; re-run transition scoring and the closed-loop benchmark at the same settings and report the
+   deltas.
+4. **ManiSkill (Linux/WSL2).** Adapter render -> V-JEPA latent -> CEM -> official success on
+   PickCube / StackCube / PegInsertionSide.
+5. **Confidence-gate data.** Perturb the start pose, plan, log terminal energy + baselines + the
+   success label — the project's central measurement.
 
 ## Stage-1 build checklist
 
@@ -99,11 +80,16 @@ benchmark-driven (`docs/experiments/benchmark_plan.md`). Remaining:
       as single source of truth, placement-fair `object_placed`, provenance (mode + bundle_id), fail-loud
       loader, report GIFs, viewer/schema/threshold docs. Tests: `tests/test_bundle_bench.py` (49 passed).
       Held-grip stability empirically verified (no physics change). Committed + pushed to main (8c129aa).
-- [~] **Full run + report (RUNNING, detached):** `logs/full_bench/run_overnight.ps1` chains Pass0 n=5
-      @samples200 (coverage, ~3.4h) -> PassA n=50 @200 (~34h) -> PassB n=50 @400 (~68h, gated on PassA).
-      All 4 tasks x cup/box. Note: samples200 = 25.3s/CEM-step -> full run is multi-day, not one night.
-      Reports: `results/benchmarks/closed_loop_{bundle200_n5,full200,full400}/`. Halt via
-      `logs/full_bench/STOP`. Then publish per-(task,object) precision curves + compare to paper Table 3.
+- [x] **place_with_object task + camera experiment:** added `place_with_object` (the place half of
+      pick_place; object starts held, 100 bundles). Camera A/B/C experiment: B_closer (same angle,
+      closer) modestly improves fine positioning; a DROID-like angle collapses planning without W*.
+      Diagnostic tooling: `--plan-gripper`, `replay_from_log.py` (reproduce any trial in 3D from the
+      log), `make_demo_gifs.py` (labeled HIT/MISS reel).
+- [~] **Full run (RUNNING):** 5 tasks x cup/box x 50 = 500 rollouts at samples 800, horizon 1,
+      maxnorm 0.075, camera B_closer. So far: reach_with_object 98%/96% (beats paper 75%), grasp
+      cup 40%/box 12%, grasp_and_reach/cup 31%; pick_place + place_with_object pending. Live report
+      `results/benchmarks/full800_B_progress/`, demos `results/demos/full800_B/`. Halt via
+      `logs/full_bench/STOP`; resume via `logs/full_bench/resume_full800_B.ps1`.
 - [ ] Trial harness + confidence-gate data collection.
 - [ ] Gate evaluation (ROC AUC vs baseline and vs pixel-error convergence).
 
