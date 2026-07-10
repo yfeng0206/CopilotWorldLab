@@ -33,7 +33,7 @@ directly comparable.
 | reach_with_object | held | carry to a goal | cup 98% / box 96% @10cm | 75% / 75% |
 | grasp_and_reach | on table | grasp, then carry (2 goals) | cup 18% / box 4% @10cm | custom |
 | pick_place | on table | grasp, vicinity, place (4/10/4) | cup 2% / box 6% @10cm | 80% / 65% |
-| place_with_object | held | carry to zone, place (2 goals) | running | custom |
+| place_with_object | held | carry to zone, place (2 goals) | cup 80% / box 86% @10cm | custom |
 
 reach_with_object exceeds the paper's real-robot rate. The table is a hard contact, so a light object
 cannot be pushed into it; if the arm drives the gripper into the tabletop the trial fails outright
