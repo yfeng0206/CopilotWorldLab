@@ -32,13 +32,14 @@ directly comparable.
 | grasp | on table | reach to grasp pose | cup 38% / box 10% @6cm | 65% / 25% |
 | reach_with_object | held | carry to a goal | cup 98% / box 96% @10cm | 75% / 75% |
 | grasp_and_reach | on table | grasp, then carry (2 goals) | cup 18% / box 4% @10cm | custom |
-| pick_place | on table | grasp, vicinity, place (4/10/4) | running | 80% / 65% |
+| pick_place | on table | grasp, vicinity, place (4/10/4) | cup 2% / box 6% @10cm | 80% / 65% |
 | place_with_object | held | carry to zone, place (2 goals) | running | custom |
 
 reach_with_object exceeds the paper's real-robot rate. The table is a hard contact, so a light object
 cannot be pushed into it; if the arm drives the gripper into the tabletop the trial fails outright
 rather than tunneling through. Grasp misses are mostly a few-cm reach error before the object tips or
-slips. Live results and precision curves:
+slips. Pick-and-place compounds the grasp, transport and release errors: cup succeeds in 1/50 fixed
+scenarios and box in 3/50. Live results and precision curves:
 [`results/benchmarks/full800_B_progress/`](results/benchmarks/full800_B_progress).
 
 ## How motion is produced

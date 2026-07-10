@@ -23,13 +23,14 @@ whether the object is **held**, its **tilt**, and the trial's **final error**.
 | reach_with_object / box | **96%** @10cm | 75% | held block carried to the goal; rare MISS tips it |
 | grasp_and_reach / cup | **18%** @10cm | (custom) | HIT grasps then carries to target; MISS grasps then drops mid-carry |
 | grasp_and_reach / box | **4%** @10cm | (custom) | HIT grasps then carries; MISS mostly drives into the table on the grasp |
+| pick_place / cup | **2%** @10cm | 80% | 1/50 succeeds; final GIF pass pending |
+| pick_place / box | **6%** @10cm | 65% | 3/50 succeed; final GIF pass pending |
 
 **reach_with_object beats the paper's real-robot rate.** The table is a hard contact: a light object
 cannot be pushed into it, and if the arm drives the gripper into the tabletop the trial fails outright
 (labeled `hit_table`) instead of tunneling through. Grasp misses are mostly a few-cm reach error
-before the object tips or slips. The compositional **grasp_and_reach** (grasp off the table, then
-carry) is now the hardest task: the grasp phase must land cleanly first, and on the box the arm mostly
-bulldozes the table (`hit_table`), so the composite falls to a few percent.
+before the object tips or slips. **pick_place** is the lowest-rate paper task because each trial must
+survive grasp, transport and release: cup finishes at 1/50 and box at 3/50.
 
 ---
 
