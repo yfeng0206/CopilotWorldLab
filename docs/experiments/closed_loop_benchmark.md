@@ -132,6 +132,22 @@ grasp-containing stage for its full step budget, and disables the scripted grasp
 goal must therefore be reached by the planner itself; the scripted post-grasp lift remains only as
 the grasp-success probe.
 
+#### Planned-gripper n=5 smoke (2026-07-10)
+
+Paired on identical corrected hard-table bundles and CEM seeds at the full 800/10 setting:
+
+| grasp success | cup | box |
+|---|---:|---:|
+| frozen gripper + scripted close | 2/5 | 0/5 |
+| planned gripper + no scripted close | 0/5 | 0/5 |
+
+The planned-gripper run made transient object contact during the V-JEPA stage in 4/5 cup and 3/5 box
+trials, but no trial retained a stable hold through lift and settle. Gripper commands often closed
+early while the arm was still approaching and sometimes reversed later. Mean pre-lift XY error
+improved slightly (cup 4.7 to 4.2 cm; box 5.2 to 5.0 cm), but cup ended 1.1 cm higher on average and
+the contact was not mechanically stable. Keep the frozen/scripted protocol as the current baseline;
+planner-controlled gripper did not improve grasp success.
+
 ## How a test runs, and every hyperparameter
 
 The benchmark is a set of nested loops:
