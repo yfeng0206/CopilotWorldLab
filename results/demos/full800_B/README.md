@@ -54,12 +54,35 @@ cup 40/50 and box 43/50, with no `hit_table` failures.
 
 ## Grasp-and-reach — V-JEPA grasps off the table (goal 1), then carries it to a target (goal 2)
 
-A 2-sub-goal composite: it chains the weak grasp with the strong held-carry, so success (~31% on cup)
-tracks the grasp landing; the common MISS is the object *dropped* during transport.
+A 2-sub-goal composite: it chains the weak grasp with the strong held-carry, so success tracks the
+grasp landing (cup 18%, box 4% @10cm); the common MISS is the object driven into the table on the
+grasp or *dropped* during transport.
 
 | | HIT | MISS |
 |---|---|---|
 | **cup** | ![gnr cup HIT](grasp_and_reach_cup_HIT.gif) | ![gnr cup MISS](grasp_and_reach_cup_MISS.gif) |
+| **box** | ![gnr box HIT](grasp_and_reach_box_HIT.gif) | ![gnr box MISS](grasp_and_reach_box_MISS.gif) |
+
+## Pick-place — V-JEPA grasps, transports, then places into a zone (4/10/4 schedule)
+
+The full paper chain: grasp off the table, carry to the vicinity, place and release. The lowest-rate
+task (cup 2%, box 6% @10cm) because a trial must survive all three phases; most misses bulldoze the
+grasp (`hit_table`) or land outside the zone.
+
+| | HIT | MISS |
+|---|---|---|
+| **cup** | ![pp cup HIT](pick_place_cup_HIT.gif) | ![pp cup MISS](pick_place_cup_MISS.gif) |
+| **box** | ![pp box HIT](pick_place_box_HIT.gif) | ![pp box MISS](pick_place_box_MISS.gif) |
+
+## Place-with-object — object starts held; V-JEPA carries to a zone and releases
+
+No grasp phase, so it tracks reach_with_object (cup 80%, box 86% @10cm) with no `hit_table` failures;
+the rare MISS releases short of the zone or tips the object.
+
+| | HIT | MISS |
+|---|---|---|
+| **cup** | ![pwo cup HIT](place_with_object_cup_HIT.gif) | ![pwo cup MISS](place_with_object_cup_MISS.gif) |
+| **box** | ![pwo box HIT](place_with_object_box_HIT.gif) | ![pwo box MISS](place_with_object_box_MISS.gif) |
 
 ---
 
