@@ -955,7 +955,8 @@ def _fixed_goal(img, target):
 def run_bundle_trial(env, ctx, tlog, args, bundle):
     """Run one FIXED-BUNDLE trial: restore the saved start state, plan with V-JEPA to the SAVED goal
     images (auto-switching sub-goals on the step budget, like the released V-JEPA 2-AC pick-and-place
-    schedule), script only the gripper at stage transitions, and score from hidden privileged state.
+    schedule), script gripper transitions unless ``--plan-gripper`` delegates grasp closure to CEM,
+    and score from hidden privileged state.
     Returns {error, gates, failure, metrics}."""
     meta, arr, imgs = bundle.meta, bundle.arrays, bundle.images
     task = meta["task"]
@@ -978,11 +979,18 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
         return Stage(name, _fixed_goal(imgs[img_key], arr[tgt_key]), steps, fixed_steps=fixed)
 
     if task == "grasp":
-        # V-JEPA reaches the grasp pose (goal = object just grabbed); close + lift are scripted.
-        run_vjepa_stages(env, ctx, tlog, [stg("vjepa_grasp", "goal", "grasp_pos", args.grasp_steps)], args)
+        # With a frozen gripper, V-JEPA reaches and scripted close completes the grasp. In
+        # --plan-gripper mode the closed goal is reachable only if CEM closes the gripper itself, so
+        # run the full stage budget and do not mask its result with a scripted close.
+        run_vjepa_stages(
+            env, ctx, tlog,
+            [stg("vjepa_grasp", "goal", "grasp_pos", args.grasp_steps, args.plan_gripper)],
+            args,
+        )
         error = float(np.linalg.norm(env.object_position()[:2] - env.get_ee_state()[:2]))
         obj_z0 = float(env.object_position()[2])
-        scripted(env, tlog, "close", None, gripper=1.0)
+        if not args.plan_gripper:
+            scripted(env, tlog, "close", None, gripper=1.0)
         scripted(env, tlog, "lift", None, dz=0.12)
         scripted(env, tlog, "settle", None, settle=20)
         obj = env.object_position()
@@ -995,8 +1003,10 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
     elif task in ("reach_with_object", "grasp_and_reach"):
         if task == "grasp_and_reach":
             run_vjepa_stages(env, ctx, tlog,
-                             [stg("vjepa_gnr_grasp", "goal_1", "grasp_pos", args.pnp_grasp_steps)], args)
-            scripted(env, tlog, "close", None, gripper=1.0)
+                             [stg("vjepa_gnr_grasp", "goal_1", "grasp_pos",
+                                  args.pnp_grasp_steps, args.plan_gripper)], args)
+            if not args.plan_gripper:
+                scripted(env, tlog, "close", None, gripper=1.0)
         run_vjepa_stages(env, ctx, tlog,
                          [stg("vjepa_reach_obj", "goal", "goal_ee", args.rwo_steps)], args)
         scripted(env, tlog, "settle", None, settle=10)
@@ -1012,7 +1022,8 @@ def run_bundle_trial(env, ctx, tlog, args, bundle):
     elif task == "pick_place":  # 3 sub-goals on the fixed 4 / 10 / 4 schedule
         run_vjepa_stages(env, ctx, tlog,
                          [stg("vjepa_pnp_grasp", "goal_1", "grasp_pos", args.pnp_grasp_steps, True)], args)
-        scripted(env, tlog, "close", None, gripper=1.0)
+        if not args.plan_gripper:
+            scripted(env, tlog, "close", None, gripper=1.0)
         grasped = bool(env.gripper_holds_object())
         run_vjepa_stages(env, ctx, tlog, [
             stg("vjepa_pnp_vicinity", "goal_2", "vicinity_pos", args.pnp_vicinity_steps, True),
@@ -1341,8 +1352,9 @@ def main() -> None:
     p.add_argument("--maxnorm", type=float, default=0.05, help="CEM per-axis action clip (m)")
     p.add_argument("--plan-gripper", action="store_true", default=False,
                    help="let CEM plan the gripper action (paper-faithful: goal images show the "
-                        "closed/open gripper, so the planner can reach them). Default off = gripper "
-                        "frozen during the V-JEPA reach and scripted afterward (honest-separation).")
+                        "closed gripper, so grasp stages run their full budget and scripted close is "
+                        "disabled). Default off = gripper frozen during the V-JEPA reach and scripted "
+                        "afterward (honest-separation).")
     p.add_argument("--replay-record", default=None,
                    help="dir to save per-trial qpos rollouts (npz) for the interactive 3D replay "
                         "viewer (scripts/replay_rollout_viewer.py). Bundle mode only.")

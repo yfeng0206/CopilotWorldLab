@@ -127,6 +127,11 @@ controller-interface experiments on identical bundles:
 Defaults are `0`, `1`, and `0` respectively. Every run records all three values in
 `run_config.json`.
 
+`--plan-gripper` is a separate protocol ablation. It enables CEM's gripper action, runs a
+grasp-containing stage for its full step budget, and disables the scripted grasp close. The closed
+goal must therefore be reached by the planner itself; the scripted post-grasp lift remains only as
+the grasp-success probe.
+
 ## How a test runs, and every hyperparameter
 
 The benchmark is a set of nested loops:
