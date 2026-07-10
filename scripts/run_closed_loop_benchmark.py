@@ -69,6 +69,7 @@ from src.envs.franka_build import (  # noqa: E402
     TABLE_TOP_Z,
 )
 from src.envs.franka_droid_env import FrankaDroidEnv  # noqa: E402
+from src.control.action_transform import rotate_action_xy  # noqa: E402
 from src.bench.schema import SUCCESS_DEFAULTS, TaskBundle  # noqa: E402
 from src.bench.success import (  # noqa: E402
     bundle_classify,
@@ -461,7 +462,7 @@ def make_planner(cem, compute_new_pose, predictor, tokens_per_frame, args, dev, 
 
 def cem_to_goal(env, encoder, predictor_plan, z_goal, target, tlog, phase, max_steps,
                 pos_tol, encode_fn, device, tokens_per_frame, dev, autocast_dtype,
-                freeze_gripper=True):
+                freeze_gripper=True, action_xy_rotation_deg=0.0):
     """Closed-loop CEM to a goal image. Returns steps taken and final distance.
 
     ``freeze_gripper`` (default True) zeros the executed gripper action so V-JEPA plans arm-only and
@@ -488,6 +489,7 @@ def cem_to_goal(env, encoder, predictor_plan, z_goal, target, tlog, phase, max_s
         action = predictor_plan(z_ctx, s_ctx, z_goal)[0, 0].float().cpu().numpy()
         if freeze_gripper:
             action[6] = 0.0  # gripper frozen during the V-JEPA reach (scripted close/open afterward)
+        action = rotate_action_xy(action, action_xy_rotation_deg)
         cem_time = time.perf_counter() - t0
         nxt = env.apply_action(action)
         realized = nxt[:3] - state[:3]
@@ -1192,12 +1194,14 @@ def run_bundle_benchmark(args, run_id, config, encoder, plan, encode_goal_factor
             cam_override = CAMERA_PRESETS.get(args.planning_camera) if args.planning_camera else None
             env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
                                  add_object=True, add_zone=True, object_type=obj, add_distractors=True,
-                                 planning_camera=cam_override)
+                                 planning_camera=cam_override, arm_gain_scale=args.arm_gain_scale,
+                                 arm_bias_compensation=args.arm_bias_compensation)
             fovy = float(env.model.vis.global_.fovy)
             ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                    "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                                   dev=dev, autocast_dtype=autocast_dtype,
-                                  freeze_gripper=not args.plan_gripper)}
+                                  freeze_gripper=not args.plan_gripper,
+                                  action_xy_rotation_deg=args.action_xy_rotation_deg)}
             label = f"{task}/{obj}"
             pair_off = zlib.crc32(label.encode()) & 0xFFFF  # per-(task,object) seed offset
             records, tlogs = [], []
@@ -1349,6 +1353,14 @@ def main() -> None:
     p.add_argument("--wall-fail-thresh", type=float, default=10.0,
                    help="score a trial as a fail if the arm pressed into the table harder than this "
                         "(N) -- a bulldoze the stiff servo cannot avoid. Light side-grazes stay below.")
+    p.add_argument("--arm-gain-scale", type=float, default=1.0,
+                   help="scale the seven arm position-servo gains and damping (default 1.0)")
+    p.add_argument("--arm-bias-compensation", type=float, default=0.0,
+                   help="fraction of MuJoCo qfrc_bias fed forward to the arm each physics step "
+                        "(0=current default, 1=full gravity/Coriolis/centrifugal compensation)")
+    p.add_argument("--action-xy-rotation-deg", type=float, default=0.0,
+                   help="fixed world/base-frame rotation applied to each executed V-JEPA XY action "
+                        "(default 0; controller-interface calibration only)")
     p.add_argument("--pos-tol", type=float, default=0.015,
                    help="early-stop the CEM loop when EE is within this of the goal (m); set to the "
                         "tightest precision threshold so the loop does not quit before the strictest "
@@ -1392,6 +1404,13 @@ def main() -> None:
     _mode_err = validate_task_mode(args.tasks, args.bundles)
     if _mode_err:
         raise SystemExit(_mode_err)
+    if not np.isfinite(args.arm_gain_scale) or args.arm_gain_scale <= 0.0:
+        raise SystemExit("--arm-gain-scale must be finite and positive")
+    if (not np.isfinite(args.arm_bias_compensation)
+            or not 0.0 <= args.arm_bias_compensation <= 1.0):
+        raise SystemExit("--arm-bias-compensation must be finite and in [0, 1]")
+    if not np.isfinite(args.action_xy_rotation_deg):
+        raise SystemExit("--action-xy-rotation-deg must be finite")
 
     # Stop-guard: if this flag file exists, exit immediately (before loading the model). Lets a
     # detached multi-run launcher be halted cleanly -- already-running invocations finish from their
@@ -1438,7 +1457,9 @@ def main() -> None:
         "cem": {"samples": args.samples, "cem_steps": args.cem_steps, "rollout_T": args.rollout,
                 "topk": args.topk, "maxnorm": args.maxnorm, "chunk": args.chunk,
                 "momentum_mean": 0.15, "momentum_std": 0.15,
-                "objective": "mean-L1 in layer-norm'd latent, gripper axis frozen"},
+                "objective": ("mean-L1 in layer-norm'd latent, gripper axis planned"
+                              if args.plan_gripper else
+                              "mean-L1 in layer-norm'd latent, gripper axis frozen")},
         "tasks": args.tasks, "trials_per_task": args.trials, "seed": args.seed,
         "protocol": args.protocol,
         "pos_tol": args.pos_tol,
@@ -1451,7 +1472,10 @@ def main() -> None:
         "env": {"embodiment": "Franka Panda + Robotiq 2F-85 (FrankaDroidEnv)",
                 "camera": "PLANNING_CAMERA (az45_el45 free cam)", "crop": CROP,
                 "cube_half_m": CUBE_HALF, "cube_start_randomized": True,
-                "zone_radius_m": SUCCESS_DEFAULTS["place"]["zone_radius"]},
+                "zone_radius_m": SUCCESS_DEFAULTS["place"]["zone_radius"],
+                "arm_gain_scale": args.arm_gain_scale,
+                "arm_bias_compensation": args.arm_bias_compensation,
+                "action_xy_rotation_deg": args.action_xy_rotation_deg},
         "normalization": "ImageNet mean/std x255 on 0-255 input (matches vendored make_transforms)",
         "logs": {"run_dir": os.path.relpath(run_dir, _REPO_ROOT),
                  "steps_csv": "steps.csv", "trials_csv": "trials.csv",
@@ -1477,6 +1501,9 @@ def main() -> None:
             "start": "restored from saved bundle qpos0 (fixed, not randomized)",
             "place_zone": "restored per bundle (mocap place zone)",
             "wall_fail_thresh_N": args.wall_fail_thresh,
+            "arm_gain_scale": args.arm_gain_scale,
+            "arm_bias_compensation": args.arm_bias_compensation,
+            "action_xy_rotation_deg": args.action_xy_rotation_deg,
         }
     else:
         config["mode"] = "random_per_trial"
@@ -1509,14 +1536,17 @@ def main() -> None:
         os.makedirs(demo_dir, exist_ok=True)
         needs_obj = args.demo in ("grasp_lift", "place", "pick_place")
         env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
-                             add_object=needs_obj, add_zone=needs_obj)
+                             add_object=needs_obj, add_zone=needs_obj,
+                             arm_gain_scale=args.arm_gain_scale,
+                             arm_bias_compensation=args.arm_bias_compensation)
         seed = args.seed * 100003 + TASK_SEED_OFFSET[args.demo]
         ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                "csv": csv, "fovy": float(env.model.vis.global_.fovy),
                "rng": np.random.default_rng(seed),
                "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                               dev=dev, autocast_dtype=autocast_dtype,
-                              freeze_gripper=not args.plan_gripper)}
+                              freeze_gripper=not args.plan_gripper,
+                              action_xy_rotation_deg=args.action_xy_rotation_deg)}
         out = os.path.join(demo_dir, f"demo_{args.demo}_compare.gif")
         torch.manual_seed(seed)
         info = run_demo(env, ctx, args, out)
@@ -1540,13 +1570,16 @@ def main() -> None:
     for task in args.tasks:
         needs_obj = task in ("grasp_lift", "place", "pick_place")
         env = FrankaDroidEnv(render_width=CROP, render_height=CROP, max_translation=0.13,
-                             add_object=needs_obj, add_zone=needs_obj)
+                             add_object=needs_obj, add_zone=needs_obj,
+                             arm_gain_scale=args.arm_gain_scale,
+                             arm_bias_compensation=args.arm_bias_compensation)
         fovy = float(env.model.vis.global_.fovy)
         task_off = TASK_SEED_OFFSET[task] * 100003
         ctx = {"encoder": encoder, "plan": plan, "encode_goal": encode_goal_factory(),
                "cem_kw": dict(encode_fn=encode, device=device, tokens_per_frame=tokens_per_frame,
                               dev=dev, autocast_dtype=autocast_dtype,
-                              freeze_gripper=not args.plan_gripper)}
+                              freeze_gripper=not args.plan_gripper,
+                              action_xy_rotation_deg=args.action_xy_rotation_deg)}
         records, tlogs = [], []
         for trial in range(args.trials):
             # deterministic per-trial seeding (numpy init + torch CEM sampling) for reproducibility

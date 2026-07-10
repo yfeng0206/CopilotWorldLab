@@ -75,10 +75,18 @@ class FrankaDroidEnv:
         object_type: str = "cube",
         add_distractors: bool = False,
         planning_camera: Optional[dict] = None,
+        arm_gain_scale: float = 1.0,
+        arm_bias_compensation: float = 0.0,
         seed: int = 0,
     ) -> None:
         import mujoco
 
+        arm_gain_scale = float(arm_gain_scale)
+        arm_bias_compensation = float(arm_bias_compensation)
+        if not np.isfinite(arm_gain_scale) or arm_gain_scale <= 0.0:
+            raise ValueError("arm_gain_scale must be finite and positive")
+        if not np.isfinite(arm_bias_compensation) or not 0.0 <= arm_bias_compensation <= 1.0:
+            raise ValueError("arm_bias_compensation must be finite and in [0, 1]")
         self._mujoco = mujoco
         self.add_object = bool(add_object)
         self.add_zone = bool(add_zone)
@@ -93,6 +101,10 @@ class FrankaDroidEnv:
             build_franka_robotiq(menagerie_dir, **_build_kwargs) if menagerie_dir
             else build_franka_robotiq(**_build_kwargs)
         )
+        self.arm_gain_scale = arm_gain_scale
+        self.arm_bias_compensation = arm_bias_compensation
+        self.model.actuator_gainprm[:ARM_DOF, 0] *= self.arm_gain_scale
+        self.model.actuator_biasprm[:ARM_DOF, 1:3] *= self.arm_gain_scale
         self.data = mujoco.MjData(self.model)
         self._ik_data = mujoco.MjData(self.model)  # scratch for IK forward-kinematics
 
@@ -357,8 +369,18 @@ class FrankaDroidEnv:
     def _step_physics(self, substeps: int) -> None:
         """Advance the sim ``substeps`` times, then sample the arm-into-table press (see hit_wall)."""
         mj = self._mujoco
-        for _ in range(substeps):
-            mj.mj_step(self.model, self.data)
+        if self.arm_bias_compensation == 0.0:
+            for _ in range(substeps):
+                mj.mj_step(self.model, self.data)
+        else:
+            self.data.qfrc_applied[:] = 0.0
+            for _ in range(substeps):
+                mj.mj_step1(self.model, self.data)
+                self.data.qfrc_applied[:ARM_DOF] = (
+                    self.arm_bias_compensation * self.data.qfrc_bias[:ARM_DOF]
+                )
+                mj.mj_step2(self.model, self.data)
+            self.data.qfrc_applied[:] = 0.0
         self._track_wall_force()
 
     def _track_wall_force(self) -> None:

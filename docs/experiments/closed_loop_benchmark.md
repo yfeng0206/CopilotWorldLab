@@ -114,6 +114,19 @@ gripper via the CEM `close_gripper` schedule; we script close/open at stage tran
 post-grasp lift used only to score `grasp`, consistent with our V-JEPA-does-spatial /
 scripted-does-gripper decomposition.
 
+### Controller-interface ablation flags
+
+The runner keeps the benchmark controller unchanged by default. Three explicit flags support paired
+controller-interface experiments on identical bundles:
+
+- `--arm-bias-compensation`: fraction of MuJoCo `qfrc_bias` fed forward to the seven arm joints;
+- `--arm-gain-scale`: multiplier for the arm position-servo gain and damping;
+- `--action-xy-rotation-deg`: one fixed world/base-frame rotation applied to executed V-JEPA XY
+  actions (a global interface calibration, never object-dependent re-centering).
+
+Defaults are `0`, `1`, and `0` respectively. Every run records all three values in
+`run_config.json`.
+
 ## How a test runs, and every hyperparameter
 
 The benchmark is a set of nested loops:

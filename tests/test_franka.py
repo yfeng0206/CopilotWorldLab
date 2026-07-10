@@ -96,6 +96,40 @@ def test_apply_action_translation(env):
     assert end[0] - start[0] == pytest.approx(0.05, abs=0.015)
 
 
+def test_arm_gain_scale_scales_position_servo():
+    from src.envs.franka_droid_env import FrankaDroidEnv
+
+    baseline = FrankaDroidEnv(render_width=64, render_height=64)
+    scaled = FrankaDroidEnv(render_width=64, render_height=64, arm_gain_scale=0.75)
+    try:
+        np.testing.assert_allclose(
+            scaled.model.actuator_gainprm[:7, 0],
+            0.75 * baseline.model.actuator_gainprm[:7, 0],
+        )
+        np.testing.assert_allclose(
+            scaled.model.actuator_biasprm[:7, 1:3],
+            0.75 * baseline.model.actuator_biasprm[:7, 1:3],
+        )
+    finally:
+        baseline.close()
+        scaled.close()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"arm_gain_scale": 0.0}, "arm_gain_scale"),
+        ({"arm_bias_compensation": -0.1}, "arm_bias_compensation"),
+        ({"arm_bias_compensation": 1.1}, "arm_bias_compensation"),
+    ],
+)
+def test_arm_controller_ablation_validates_ranges(kwargs, message):
+    from src.envs.franka_droid_env import FrankaDroidEnv
+
+    with pytest.raises(ValueError, match=message):
+        FrankaDroidEnv(render_width=64, render_height=64, **kwargs)
+
+
 def test_reachable_action_reports_ok(env):
     env.apply_action([0.03, 0.0, 0.0, 0, 0, 0, 0.0])
     assert env.last_action_ok is True
