@@ -23,8 +23,8 @@ whether the object is **held**, its **tilt**, and the trial's **final error**.
 | reach_with_object / box | **96%** @10cm | 75% | held block carried to the goal; rare MISS tips it |
 | grasp_and_reach / cup | **18%** @10cm | (custom) | HIT grasps then carries to target; MISS grasps then drops mid-carry |
 | grasp_and_reach / box | **4%** @10cm | (custom) | HIT grasps then carries; MISS mostly drives into the table on the grasp |
-| pick_place / cup | **2%** @10cm | 80% | 1/50 succeeds; final GIF pass pending |
-| pick_place / box | **6%** @10cm | 65% | 3/50 succeed; final GIF pass pending |
+| pick_place / cup | **2%** @10cm | 80% | 1/50 succeeds; misses bulldoze the grasp or land outside the zone |
+| pick_place / box | **6%** @10cm | 65% | 3/50 succeed; misses bulldoze the grasp or land outside the zone |
 | place_with_object / cup | **80%** @10cm | (custom) | held cup carried to the zone and released |
 | place_with_object / box | **86%** @10cm | (custom) | held block carried to the zone and released |
 
